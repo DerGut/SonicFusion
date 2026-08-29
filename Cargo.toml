@@ -9,6 +9,7 @@ datafusion = "=54.1.0"
 futures = "=0.3.31"
 hound = "=3.5.1"
 tokio = { version = "=1.52.4", features = ["macros", "rt-multi-thread"] }
+typed-builder = "0.23.2"
 
 [dev-dependencies]
 tempfile = "=3.20.0"
