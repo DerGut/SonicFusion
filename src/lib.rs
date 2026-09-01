@@ -1,6 +1,7 @@
 mod config;
 mod dsp;
 mod layout;
+pub mod physical;
 
 pub use config::{RenderConfig, RenderConfigBuilder};
 

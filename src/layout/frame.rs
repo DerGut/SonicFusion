@@ -4,10 +4,6 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 
 use crate::RenderConfig;
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "consumed by the frame source later")
-)]
 pub(crate) fn frame_schema(config: &RenderConfig) -> SchemaRef {
     let frame = Field::new("frame", DataType::UInt64, false);
     let sample = Field::new("sample", DataType::Float32, false);
