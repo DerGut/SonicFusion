@@ -1,6 +1,6 @@
 use crate::{Error::InvalidConfig, Result};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RenderConfig {
     sample_rate_hz: u32,
     frame_count: u64,

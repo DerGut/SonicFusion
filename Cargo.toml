@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 
 [dependencies]
+async-stream = "=0.3.6"
 datafusion = "=54.1.0"
 futures = "=0.3.31"
 hound = "=3.5.1"

@@ -1,9 +1,5 @@
 use std::f64::consts;
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "consumed by the frame source in U2")
-)]
 pub(crate) fn sine_at_frame(frame: u64, sample_rate_hz: u32, frequency_hz: f64) -> f32 {
     let phase = consts::TAU * frame as f64 * frequency_hz / sample_rate_hz as f64;
     phase.sin() as f32
