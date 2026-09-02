@@ -17,7 +17,7 @@ The initial challenge is to discover a useful Arrow representation for audio whi
 
 - F1. Representation experiment
   - **Trigger:** The learner runs the first SonicFusion example.
-  - **Steps:** Build the same finite sine-to-gain graph using each candidate Arrow layout; execute it as a DataFusion physical plan; collect the resulting batches once; write both a WAV file and a waveform plot; compare the implementations and outputs.
+  - **Steps:** Build the same unbounded sine source and gain graph using each candidate Arrow layout; add a physical render boundary that produces exactly the requested number of audio frames, reusing DataFusion's relational limit when rows map one-to-one to frames; collect the bounded result once; write both a WAV file and a waveform plot; compare the implementations and outputs.
   - **Outcome:** Both layouts produce equivalent signals, and their trade-offs are documented well enough to choose a direction or justify retaining both.
   - **Covered by:** R4, R5, R6, R7, R8, R9, R10
 
@@ -39,7 +39,7 @@ The initial challenge is to discover a useful Arrow representation for audio whi
 
 **First milestone: physical execution and representation lab**
 
-- R4. The first graph must render a finite, deterministic, mono sine oscillator through a gain processor offline.
+- R4. The first graph must model the mono sine oscillator as an unbounded source, process it through gain, and end in a bounded physical render plan that produces exactly the requested number of audio frames; the frame-per-row layout must reuse DataFusion's standard row limit rather than duplicate it in a custom operator.
 - R5. A Rust builder API must compose custom DataFusion physical execution nodes directly for the first milestone, without requiring SQL or custom logical planning.
 - R6. The same graph must be implemented with two Arrow layouts: one audio frame per row and one processing block per row.
 - R7. Each implementation must preserve sample order, oscillator phase, and gain behavior across multiple RecordBatches so that batch boundaries do not change the signal.
@@ -60,7 +60,7 @@ The initial challenge is to discover a useful Arrow representation for audio whi
 
 ## Acceptance Examples
 
-- AE1. **Covers R4, R7, R8.** Given a finite sine render whose duration spans several batches, running the example produces one playable WAV and one waveform image without phase discontinuities at batch boundaries.
+- AE1. **Covers R4, R7, R8.** Given an unbounded sine source wrapped by a bounded render plan whose requested duration spans several batches, running the example produces one playable WAV and one waveform image without phase discontinuities at batch boundaries.
 - AE2. **Covers R6, R9.** Given identical oscillator, gain, sample-rate, duration, and block-size settings, the frame-row and block-row plans produce the same number of frames and numerically equivalent samples.
 - AE3. **Covers R10.** After completing both implementations, the learner can explain why a RecordBatch can itself act as a DSP block, what nesting samples inside a row changes, and which layout should be carried forward.
 - AE4. **Covers R14.** In the later optimizer milestone, plan inspection shows one gain node with factor `0.25` where two adjacent `0.5` nodes existed, and rendered samples remain equivalent within tolerance.
@@ -108,7 +108,7 @@ These items are deliberately deferred from milestone one but must remain visible
 
 ## Key Decisions
 
-- Offline before real-time: deterministic bounded execution fits DataFusion's model and shortens the feedback loop.
+- Offline before real-time: model naturally unbounded generated signals separately from bounded render plans; deterministic finite execution produces the finite offline artifact and shortens the feedback loop.
 - WAV plus waveform: audio and visualization are both first-class feedback, with frequency-domain views deferred until filter work.
 - Rust builder before SQL: the initial interface should expose graph construction without requiring language design.
 - Physical plans before logical plans: learn execution and streaming batches before adding planner-extension boilerplate.

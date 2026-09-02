@@ -21,7 +21,8 @@ async fn test_frame_sine_osc_exec_limited() {
     let config = test_config();
     let sine_osc = Arc::new(FrameSineOscExec::new(config.clone()));
 
-    let limit = config.frame_count() as usize;
+    let limit = usize::try_from(config.frame_count())
+        .expect("test frame count should fit DataFusion's usize row limit");
     let limit_exec = GlobalLimitExec::new(sine_osc as Arc<dyn ExecutionPlan>, 0, Some(limit));
 
     assert_matches!(limit_exec.properties().boundedness, Boundedness::Bounded);
@@ -45,29 +46,31 @@ async fn test_frame_sine_osc_exec_limited() {
 
     let frames = batches
         .iter()
-        .map(|batch| {
+        .flat_map(|batch| {
             batch
                 .column(0)
                 .as_any()
                 .downcast_ref::<UInt64Array>()
-                .expect("expected some batch")
+                .expect("frame column 0 expected to be u64")
+                .values()
+                .iter()
+                .copied()
         })
-        .flatten()
-        .flatten()
         .collect::<Vec<_>>();
     assert_eq!(frames, (0_u64..10).collect::<Vec<_>>());
 
     let samples = batches
         .iter()
-        .map(|batch| {
+        .flat_map(|batch| {
             batch
                 .column(1)
                 .as_any()
                 .downcast_ref::<Float32Array>()
-                .expect("expected some batch")
+                .expect("sample column 1 expected to be f32")
+                .values()
+                .iter()
+                .copied()
         })
-        .flatten()
-        .flatten()
         .collect::<Vec<_>>();
     assert_eq!(samples.last(), Some(&test_sine_samples(9)));
 }
