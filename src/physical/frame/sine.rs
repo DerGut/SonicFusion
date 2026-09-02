@@ -23,8 +23,8 @@ pub struct FrameSineOscExec {
 }
 
 impl FrameSineOscExec {
-    pub fn new(config: RenderConfig) -> Self {
-        let schema = frame_schema(&config);
+    pub fn new(config: &RenderConfig) -> Self {
+        let schema = frame_schema(config);
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(schema),
             Partitioning::UnknownPartitioning(1),
@@ -167,7 +167,7 @@ mod tests {
     #[tokio::test]
     async fn test_frame_sine_osc_exec_limited() {
         let config = test_config();
-        let sine_osc = Arc::new(FrameSineOscExec::new(config.clone()));
+        let sine_osc = Arc::new(FrameSineOscExec::new(&config));
 
         let limit = usize::try_from(config.frame_count())
             .expect("test frame count should fit DataFusion's usize row limit");
@@ -226,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn test_frame_sine_osc_exec_emits_continuous_full_batches() {
         let config = test_config();
-        let exec = FrameSineOscExec::new(config.clone());
+        let exec = FrameSineOscExec::new(&config);
 
         let batches = exec
             .execute(0, Arc::new(TaskContext::default()))
@@ -280,7 +280,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_frame_sine_osc_exec_fails_for_non_zero_partition() {
-        let exec = FrameSineOscExec::new(test_config());
+        let exec = FrameSineOscExec::new(&test_config());
 
         let error = exec
             .execute(1, Arc::new(TaskContext::default()))
@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_different_frame_sine_osc_exec_executions_start_from_0() {
-        let exec = FrameSineOscExec::new(test_config());
+        let exec = FrameSineOscExec::new(&test_config());
 
         let exec1_batch = exec
             .execute(0, Arc::new(TaskContext::default()))
@@ -332,13 +332,13 @@ mod tests {
 
     #[test]
     fn test_frame_sine_osc_exec_name() {
-        let exec = FrameSineOscExec::new(RenderConfig::default());
+        let exec = FrameSineOscExec::new(&RenderConfig::default());
         assert_eq!(exec.name(), "FrameSineOscExec");
     }
 
     #[test]
     fn test_frame_sine_osc_exec_display_uses_the_node_name() {
-        let exec = FrameSineOscExec::new(test_config());
+        let exec = FrameSineOscExec::new(&test_config());
         let display = displayable(&exec).one_line().to_string();
 
         assert!(display.starts_with("FrameSineOscExec:"), "{display}");
@@ -346,13 +346,13 @@ mod tests {
 
     #[test]
     fn test_frame_sine_osc_exec_children() {
-        let exec = FrameSineOscExec::new(RenderConfig::default());
+        let exec = FrameSineOscExec::new(&RenderConfig::default());
         assert_eq!(exec.children().len(), 0);
     }
 
     #[test]
     fn test_frame_sine_osc_exec_with_children() {
-        let exec = Arc::new(FrameSineOscExec::new(RenderConfig::default()));
+        let exec = Arc::new(FrameSineOscExec::new(&RenderConfig::default()));
 
         let result = Arc::clone(&exec).with_new_children(vec![]);
         assert!(result.is_ok()); // With empty children succeeds.
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_frame_sine_osc_exec_plan_properties() {
-        let exec = FrameSineOscExec::new(RenderConfig::default());
+        let exec = FrameSineOscExec::new(&RenderConfig::default());
 
         let props = exec.properties();
         assert_matches!(props.partitioning, Partitioning::UnknownPartitioning(1));
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_frame_sine_osc_exec_schema() {
-        let exec = FrameSineOscExec::new(test_config());
+        let exec = FrameSineOscExec::new(&test_config());
 
         let schema = exec.schema();
         assert_eq!(schema.fields().len(), 2);
