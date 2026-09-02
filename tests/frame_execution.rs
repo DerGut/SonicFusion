@@ -5,14 +5,72 @@ use datafusion::{
         array::{Float32Array, UInt64Array},
         datatypes::DataType,
     },
+    common::assert_contains,
     execution::TaskContext,
     physical_plan::{
-        ExecutionPlan, Partitioning, displayable,
+        ExecutionPlan, Partitioning, collect, displayable,
         execution_plan::{Boundedness, EmissionType},
+        limit::GlobalLimitExec,
     },
 };
 use futures::{StreamExt, TryStreamExt};
 use sonicfusion::{RenderConfig, physical::frame::FrameSineOscExec};
+
+#[tokio::test]
+async fn test_frame_sine_osc_exec_limited() {
+    let config = test_config();
+    let sine_osc = Arc::new(FrameSineOscExec::new(config.clone()));
+
+    let limit = config.frame_count() as usize;
+    let limit_exec = GlobalLimitExec::new(sine_osc as Arc<dyn ExecutionPlan>, 0, Some(limit));
+
+    assert_matches!(limit_exec.properties().boundedness, Boundedness::Bounded);
+
+    let format = displayable(&limit_exec).indent(false).to_string();
+    assert_contains!(&format, "FrameSineOscExec");
+    assert_contains!(&format, "GlobalLimitExec");
+
+    let batches = collect(Arc::new(limit_exec), Arc::new(TaskContext::default()))
+        .await
+        .expect("expect no error collecting batches");
+
+    assert_eq!(batches.len(), 3);
+    assert_eq!(
+        batches
+            .iter()
+            .map(|batch| batch.num_rows())
+            .collect::<Vec<_>>(),
+        vec![4, 4, 2]
+    );
+
+    let frames = batches
+        .iter()
+        .map(|batch| {
+            batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("expected some batch")
+        })
+        .flatten()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(frames, (0_u64..10).collect::<Vec<_>>());
+
+    let samples = batches
+        .iter()
+        .map(|batch| {
+            batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<Float32Array>()
+                .expect("expected some batch")
+        })
+        .flatten()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(samples.last(), Some(&test_sine_samples(9)));
+}
 
 #[tokio::test]
 async fn test_frame_sine_osc_exec_emits_continuous_full_batches() {
@@ -54,12 +112,7 @@ async fn test_frame_sine_osc_exec_emits_continuous_full_batches() {
             let frame = next_expected_frame + row as u64;
             assert_eq!(frames.value(row), frame);
 
-            let expected_sample = match frame % 4 {
-                0 | 2 => 0.0,
-                1 => 1.0,
-                3 => -1.0,
-                _ => unreachable!(),
-            };
+            let expected_sample = test_sine_samples(frame);
             assert!(
                 (samples.value(row) - expected_sample).abs() <= 1e-6,
                 "unexpected sample at frame {frame}: expected {expected_sample}, got {}",
@@ -213,4 +266,13 @@ fn test_config() -> RenderConfig {
         .frequency_hz(2.0)
         .build()
         .expect("test configuration should be valid")
+}
+
+fn test_sine_samples(frame: u64) -> f32 {
+    match frame % 4 {
+        0 | 2 => 0.0,
+        1 => 1.0,
+        3 => -1.0,
+        _ => unreachable!(),
+    }
 }
