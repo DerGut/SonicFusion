@@ -9,8 +9,7 @@ use datafusion::{
     execution::{SendableRecordBatchStream, TaskContext},
     physical_expr::EquivalenceProperties,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
-        execution_plan::{Boundedness, EmissionType},
+        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
         stream::RecordBatchStreamAdapter,
     },
 };
@@ -31,22 +30,25 @@ impl FrameGainExec {
 
         if input.schema() != schema {
             return Err(datafusion::error::DataFusionError::Plan(format!(
-                "FrameGainExec expected input schema to be {schema:?}, but got {input:?}"
+                "FrameGainExec expected input schema to be {schema:?}, but got {:?}",
+                input.schema()
             )));
         }
 
-        Ok(Self {
-            input,
-            gain: config.gain(),
+        Ok(Self::new(input, config.gain()))
+    }
+
+    fn new(input: Arc<dyn ExecutionPlan>, gain: f32) -> Self {
+        Self {
+            input: Arc::clone(&input),
+            gain,
             properties: Arc::new(PlanProperties::new(
-                EquivalenceProperties::new(schema),
-                Partitioning::UnknownPartitioning(1),
-                EmissionType::Incremental,
-                Boundedness::Unbounded {
-                    requires_infinite_memory: false,
-                },
+                EquivalenceProperties::new(input.schema()),
+                input.output_partitioning().clone(),
+                input.pipeline_behavior(),
+                input.boundedness(),
             )),
-        })
+        }
     }
 }
 
@@ -73,19 +75,17 @@ impl ExecutionPlan for FrameGainExec {
             ));
         }
 
-        if children[0].schema() != self.schema() {
+        let new_input = Arc::clone(&children[0]);
+
+        if new_input.schema() != self.schema() {
             return Err(datafusion::error::DataFusionError::Plan(format!(
                 "FrameGainExec expected input schema to be {:?}, but got {:?}",
                 self.schema(),
-                children[0].schema()
+                new_input.schema()
             )));
         }
 
-        Ok(Arc::new(Self {
-            input: Arc::clone(&children[0]),
-            gain: self.gain,
-            properties: Arc::clone(&self.properties),
-        }))
+        Ok(Arc::new(Self::new(new_input, self.gain)))
     }
 
     fn execute(
@@ -215,7 +215,7 @@ mod tests {
 
         let format = displayable(plan.as_ref()).indent(false).to_string();
         assert_contains!(&format, "GlobalLimitExec");
-        assert_contains!(&format, "FrameSineOscExec");
+        assert_contains!(&format, "FrameGainExec");
         assert_contains!(&format, "FrameSineOscExec");
     }
 
@@ -237,12 +237,35 @@ mod tests {
     }
 
     #[test]
-    fn test_gain_with_children() {
-        let config = RenderConfig::default();
-        let plan = test_sine_gain_plan(&config);
+    fn test_gain_preserves_bounded_child_properties() {
+        let config = test_config();
+        let sine: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::new(&config));
+        let limit = usize::try_from(config.frame_count())
+            .expect("test frame count should fit DataFusion's usize row limit");
+        let bounded_input: Arc<dyn ExecutionPlan> =
+            Arc::new(GlobalLimitExec::new(sine, 0, Some(limit)));
 
-        plan.with_new_children(vec![Arc::new(FrameSineOscExec::new(&config))])
-            .expect("expected successful construction of new FrameGainExec");
+        let gain = FrameGainExec::try_new(bounded_input, &config)
+            .expect("bounded frame input should be accepted");
+
+        assert_eq!(gain.properties().boundedness, Boundedness::Bounded);
+    }
+
+    #[test]
+    fn test_gain_with_children_recomputes_properties() {
+        let config = test_config();
+        let plan = test_sine_gain_plan(&config);
+        let sine: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::new(&config));
+        let limit = usize::try_from(config.frame_count())
+            .expect("test frame count should fit DataFusion's usize row limit");
+        let bounded_replacement: Arc<dyn ExecutionPlan> =
+            Arc::new(GlobalLimitExec::new(sine, 0, Some(limit)));
+
+        let rebuilt = plan
+            .with_new_children(vec![bounded_replacement])
+            .expect("bounded replacement child should be accepted");
+
+        assert_eq!(rebuilt.boundedness(), Boundedness::Bounded);
     }
 
     fn assert_eq_approximate(a: Vec<f32>, b: Vec<f32>) {
@@ -264,9 +287,9 @@ mod tests {
     }
 
     fn test_sine_gain_plan(config: &RenderConfig) -> Arc<dyn ExecutionPlan> {
-        let sine_osc = FrameSineOscExec::new(&config);
+        let sine_osc = FrameSineOscExec::new(config);
 
-        let gain = FrameGainExec::try_new(Arc::new(sine_osc), &config)
+        let gain = FrameGainExec::try_new(Arc::new(sine_osc), config)
             .expect("expected successful construction of new FrameGainExec");
 
         Arc::new(gain)
