@@ -5,6 +5,7 @@ pub mod physical;
 mod render;
 
 pub use config::{RenderConfig, RenderConfigBuilder};
+pub use render::decode_from_frames;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
