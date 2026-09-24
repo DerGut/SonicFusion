@@ -358,7 +358,7 @@ flowchart TB
 
 ---
 
-- [ ] U3. **Add frame gain, collection, and canonical samples**
+- [x] U3. **Add frame gain, collection, and canonical samples**
 
 **Goal:** Learn a custom unary physical node and establish the collect-once boundary for the frame layout.
 

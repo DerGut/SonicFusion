@@ -150,6 +150,7 @@ mod tests {
     use datafusion::{
         arrow::array::{Float32Array, UInt64Array},
         common::assert_contains,
+        error::DataFusionError,
         execution::TaskContext,
         physical_plan::{
             ExecutionPlan, ExecutionPlanProperties, collect, displayable,
@@ -158,7 +159,7 @@ mod tests {
     };
 
     use crate::{
-        RenderConfig,
+        RenderConfig, decode_from_frames,
         layout::frame::frame_schema,
         physical::frame::{FrameGainExec, FrameSineOscExec},
     };
@@ -208,15 +209,44 @@ mod tests {
                     .copied()
             })
             .collect::<Vec<_>>();
-        assert_eq_approximate(
-            samples,
-            vec![0.0_f32, 0.5, 0., -0.5, 0., 0.5, 0.0, -0.5, 0., 0.5],
+        assert_samples_approximately_equal(
+            &samples,
+            &[0.0_f32, 0.5, 0., -0.5, 0., 0.5, 0.0, -0.5, 0., 0.5],
         );
 
         let format = displayable(plan.as_ref()).indent(false).to_string();
         assert_contains!(&format, "GlobalLimitExec");
         assert_contains!(&format, "FrameGainExec");
         assert_contains!(&format, "FrameSineOscExec");
+    }
+
+    #[tokio::test]
+    async fn test_gain_handles_zero_negative_small_and_large_factors() {
+        for gain in [0.0, -0.5, 1e-4, 1e4] {
+            let config = test_config_with_gain(gain);
+            let plan = test_sine_gain_limit_plan(&config);
+            let batches = collect(plan, Arc::new(TaskContext::default()))
+                .await
+                .expect("bounded gain render should collect successfully");
+            let samples = decode_from_frames(&batches, &config)
+                .expect("gain render should decode successfully");
+            let expected = (0..config.frame_count())
+                .map(|frame| {
+                    let unit_sample = match frame % 4 {
+                        0 | 2 => 0.0,
+                        1 => 1.0,
+                        3 => -1.0,
+                        _ => unreachable!(),
+                    };
+                    unit_sample * gain
+                })
+                .collect::<Vec<_>>();
+
+            assert_samples_approximately_equal(&samples, &expected);
+
+            let actual_peak = samples.iter().copied().map(f32::abs).fold(0.0, f32::max);
+            assert_value_approximately_equal(actual_peak, gain.abs(), "peak magnitude");
+        }
     }
 
     #[test]
@@ -234,6 +264,31 @@ mod tests {
                 requires_infinite_memory: false
             }
         );
+    }
+
+    #[test]
+    fn test_gain_rejects_an_incompatible_frame_schema() {
+        let source_config = test_config();
+        let expected_config = RenderConfig::builder()
+            .sample_rate_hz(16)
+            .frame_count(source_config.frame_count())
+            .batch_frame_capacity(source_config.batch_frame_capacity())
+            .frequency_hz(source_config.frequency_hz())
+            .gain(source_config.gain())
+            .build()
+            .expect("expected-schema configuration should be valid");
+        let source: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::new(&source_config));
+
+        let error = FrameGainExec::try_new(source, &expected_config)
+            .expect_err("mismatched sample-rate metadata should be rejected");
+
+        match error {
+            DataFusionError::Plan(message) => {
+                assert_contains!(&message, "FrameGainExec expected input schema");
+                assert_contains!(&message, "audio.sample_rate_hz");
+            }
+            other => panic!("expected a plan error, got {other}"),
+        }
     }
 
     #[test]
@@ -268,20 +323,53 @@ mod tests {
         assert_eq!(rebuilt.boundedness(), Boundedness::Bounded);
     }
 
-    fn assert_eq_approximate(a: Vec<f32>, b: Vec<f32>) {
-        let epsilon = 1e-6;
-        assert_eq!(a.len(), b.len());
-        for (a, b) in a.iter().zip(b.iter()) {
-            assert!((a - b).abs() < epsilon);
+    #[tokio::test]
+    async fn test_repeated_gain_executions_are_independent() {
+        let config = test_config();
+        let plan = test_sine_gain_limit_plan(&config);
+        let context = Arc::new(TaskContext::default());
+
+        let first_batches = collect(Arc::clone(&plan), Arc::clone(&context))
+            .await
+            .expect("first gain execution should collect successfully");
+        let second_batches = collect(plan, context)
+            .await
+            .expect("second gain execution should collect successfully");
+        let first_samples = decode_from_frames(&first_batches, &config)
+            .expect("first gain execution should decode successfully");
+        let second_samples = decode_from_frames(&second_batches, &config)
+            .expect("second gain execution should decode successfully");
+
+        assert_samples_approximately_equal(&first_samples, &second_samples);
+    }
+
+    fn assert_samples_approximately_equal(actual: &[f32], expected: &[f32]) {
+        assert_eq!(actual.len(), expected.len());
+        for (frame, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+            assert_value_approximately_equal(actual, expected, &format!("sample at frame {frame}"));
         }
     }
 
+    fn assert_value_approximately_equal(actual: f32, expected: f32, context: &str) {
+        let absolute_difference = (actual - expected).abs();
+        let tolerance = f32::max(1e-7, 1e-5 * f32::max(actual.abs(), expected.abs()));
+        assert!(
+            absolute_difference <= tolerance,
+            "{context} mismatch: expected {expected}, got {actual} (difference {absolute_difference}, tolerance {tolerance})"
+        );
+    }
+
     fn test_config() -> RenderConfig {
+        test_config_with_gain(0.5)
+    }
+
+    fn test_config_with_gain(gain: f32) -> RenderConfig {
         RenderConfig::builder()
             .sample_rate_hz(8)
             .frame_count(10)
             .batch_frame_capacity(4)
             .frequency_hz(2.0)
+            .gain(gain)
             .build()
             .expect("test configuration should be valid")
     }
