@@ -1,33 +1,66 @@
-use datafusion::arrow::array::{Array, Float32Array, RecordBatch, UInt64Array};
+use datafusion::arrow::{
+    array::{Array, Float32Array, PrimitiveArray, RecordBatch, UInt64Array},
+    datatypes::{Float32Type, SchemaRef, UInt64Type},
+};
 
-use crate::{Error::InvalidRender, RenderConfig, layout::frame::frame_schema};
+use crate::{Error::InvalidRender, RenderConfig, Result, layout::frame::frame_schema};
 
-pub fn decode_from_frames(
-    batches: &[RecordBatch],
-    config: &RenderConfig,
-) -> crate::Result<Vec<f32>> {
-    let buffer_capacity = usize::try_from(config.frame_count()).map_err(|error| {
-        InvalidRender(format!(
-            "configured frame count {} does not fit this platform's usize frame index (maximum {}): {error}",
-            config.frame_count(),
-            usize::MAX,
-        ))
-    })?;
+pub fn decode_from_frames(batches: &[RecordBatch], config: &RenderConfig) -> Result<Vec<f32>> {
+    BufferedFrameDecoder::try_new(config)?.decode(batches)
+}
 
-    if batches.is_empty() {
-        return Err(InvalidRender(
-            "frame render contained no RecordBatches; first missing frame is 0".to_string(),
-        ));
+struct BufferedFrameDecoder {
+    configured_frame_count: u64,
+    expected_schema: SchemaRef,
+
+    next_expected_frame: u64,
+    sample_buffer: Vec<f32>,
+}
+
+impl BufferedFrameDecoder {
+    fn try_new(config: &RenderConfig) -> Result<Self> {
+        let buffer_capacity = usize::try_from(config.frame_count()).map_err(|error| {
+            InvalidRender(format!(
+                "configured frame count {} does not fit this platform's usize frame index (maximum {}): {error}",
+                config.frame_count(),
+                usize::MAX,
+            ))
+        })?;
+
+        Ok(BufferedFrameDecoder {
+            configured_frame_count: config.frame_count(),
+            expected_schema: frame_schema(config),
+            next_expected_frame: 0,
+            sample_buffer: Vec::with_capacity(buffer_capacity),
+        })
     }
 
-    let expected_schema = frame_schema(config);
-    let mut sample_buffer = Vec::with_capacity(buffer_capacity);
-    let mut next_expected_frame = 0_u64;
+    fn decode(mut self, batches: &[RecordBatch]) -> Result<Vec<f32>> {
+        if batches.is_empty() {
+            return Err(InvalidRender(
+                "frame render contained no RecordBatches; first missing frame is 0".to_string(),
+            ));
+        }
 
-    for (batch_index, batch) in batches.iter().enumerate() {
-        if batch.schema() != expected_schema {
+        for (batch_index, batch) in batches.iter().enumerate() {
+            self.decode_batch(batch_index, batch)?;
+        }
+
+        if self.next_expected_frame != self.configured_frame_count {
             return Err(InvalidRender(format!(
-                "schema mismatch in batch {batch_index}: expected {expected_schema:?}, got {:?}",
+                "frame render ended early: first missing frame is {}; expected coverage 0..{}",
+                self.next_expected_frame, self.configured_frame_count,
+            )));
+        }
+
+        Ok(self.sample_buffer)
+    }
+
+    fn decode_batch(&mut self, batch_index: usize, batch: &RecordBatch) -> Result<()> {
+        if batch.schema() != self.expected_schema {
+            return Err(InvalidRender(format!(
+                "schema mismatch in batch {batch_index}: expected {:?}, got {:?}",
+                self.expected_schema,
                 batch.schema(),
             )));
         }
@@ -52,52 +85,60 @@ pub fn decode_from_frames(
             })?;
 
         for row_index in 0..batch.num_rows() {
-            if next_expected_frame >= config.frame_count() {
-                return Err(InvalidRender(format!(
-                    "unexpected extra frame in batch {batch_index} row {row_index}; expected coverage 0..{}",
-                    config.frame_count(),
-                )));
-            }
-            if frames.is_null(row_index) {
-                return Err(InvalidRender(format!(
-                    "null frame index in batch {batch_index} row {row_index}"
-                )));
-            }
-            if samples.is_null(row_index) {
-                return Err(InvalidRender(format!(
-                    "null sample at frame {next_expected_frame} in batch {batch_index} row {row_index}"
-                )));
-            }
+            let sample = self.next_sample(batch_index, row_index, frames, samples)?;
 
-            let actual_frame = frames.value(row_index);
-            if actual_frame != next_expected_frame {
-                return Err(InvalidRender(format!(
-                    "discontinuous frame sequence in batch {batch_index} row {row_index}: expected frame {next_expected_frame}, got {actual_frame}"
-                )));
-            }
-
-            let sample = samples.value(row_index);
-            if !sample.is_finite() {
-                return Err(InvalidRender(format!(
-                    "non-finite sample at frame {actual_frame} in batch {batch_index} row {row_index}"
-                )));
-            }
-
-            sample_buffer.push(sample);
-            next_expected_frame = next_expected_frame.checked_add(1).ok_or_else(|| {
-                InvalidRender("decoded frame position overflowed UInt64".to_string())
-            })?;
+            self.sample_buffer.push(sample);
+            self.next_expected_frame =
+                self.next_expected_frame.checked_add(1).ok_or_else(|| {
+                    InvalidRender("decoded frame position overflowed UInt64".to_string())
+                })?;
         }
+
+        Ok(())
     }
 
-    if next_expected_frame != config.frame_count() {
-        return Err(InvalidRender(format!(
-            "frame render ended early: first missing frame is {next_expected_frame}; expected coverage 0..{}",
-            config.frame_count(),
-        )));
-    }
+    fn next_sample(
+        &self,
+        batch_index: usize,
+        row_index: usize,
+        frames: &PrimitiveArray<UInt64Type>,
+        samples: &PrimitiveArray<Float32Type>,
+    ) -> Result<f32> {
+        if self.next_expected_frame >= self.configured_frame_count {
+            return Err(InvalidRender(format!(
+                "unexpected extra frame in batch {batch_index} row {row_index}; expected coverage 0..{}",
+                self.configured_frame_count,
+            )));
+        }
+        if frames.is_null(row_index) {
+            return Err(InvalidRender(format!(
+                "null frame index in batch {batch_index} row {row_index}"
+            )));
+        }
+        if samples.is_null(row_index) {
+            return Err(InvalidRender(format!(
+                "null sample at frame {} in batch {batch_index} row {row_index}",
+                self.next_expected_frame
+            )));
+        }
 
-    Ok(sample_buffer)
+        let actual_frame = frames.value(row_index);
+        if actual_frame != self.next_expected_frame {
+            return Err(InvalidRender(format!(
+                "discontinuous frame sequence in batch {batch_index} row {row_index}: expected frame {}, got {actual_frame}",
+                self.next_expected_frame
+            )));
+        }
+
+        let sample = samples.value(row_index);
+        if !sample.is_finite() {
+            return Err(InvalidRender(format!(
+                "non-finite sample at frame {actual_frame} in batch {batch_index} row {row_index}"
+            )));
+        }
+
+        Ok(sample)
+    }
 }
 
 #[cfg(test)]
