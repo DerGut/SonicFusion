@@ -5,10 +5,17 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use crate::RenderConfig;
 
 pub(crate) fn frame_schema(config: &RenderConfig) -> SchemaRef {
+    SchemaRef::new(frame_schema_val(config))
+}
+
+/// Returns an owned Schema value. This should only be used by tests
+/// that need to further modify the schema. Otherwise, this is backing
+/// the intended API [`frame_schema`].
+pub(crate) fn frame_schema_val(config: &RenderConfig) -> Schema {
     let frame = Field::new("frame", DataType::UInt64, false);
     let sample = Field::new("sample", DataType::Float32, false);
 
-    let schema = Schema::new_with_metadata(
+    Schema::new_with_metadata(
         vec![frame, sample],
         HashMap::from([
             (
@@ -18,9 +25,7 @@ pub(crate) fn frame_schema(config: &RenderConfig) -> SchemaRef {
             ("audio.channels".to_string(), "1".to_string()),
             ("audio.layout".to_string(), "frame".to_string()),
         ]),
-    );
-
-    SchemaRef::new(schema)
+    )
 }
 
 #[cfg(test)]
