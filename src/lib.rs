@@ -6,7 +6,7 @@ pub mod physical;
 mod render;
 
 pub use config::{RenderConfig, RenderConfigBuilder};
-pub use output::write_wav;
+pub use output::{write_wav, write_waveform_svg};
 pub use render::decode_from_frames;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -25,5 +25,12 @@ pub enum Error {
         path: std::path::PathBuf,
         #[source]
         source: hound::Error,
+    },
+
+    #[error("failed to write waveform SVG at {path}: {source}")]
+    WaveformError {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
     },
 }

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{Error, Error::InvalidRender, RenderConfig, Result};
+use crate::{Error, RenderConfig, Result, output::validate_samples};
 
 pub fn write_wav(path: impl AsRef<Path>, samples: &[f32], config: &RenderConfig) -> Result<()> {
     let path = path.as_ref();
@@ -33,36 +33,6 @@ fn wav_error(action: impl Into<String>, path: &Path, source: hound::Error) -> Er
         path: path.to_path_buf(),
         source,
     }
-}
-
-fn validate_samples(samples: &[f32], config: &RenderConfig) -> Result<()> {
-    let expected_sample_count = usize::try_from(config.frame_count()).map_err(|error| {
-        InvalidRender(format!(
-            "configured frame count {} does not fit this platform's usize sample index (maximum {}): {error}",
-            config.frame_count(),
-            usize::MAX,
-        ))
-    })?;
-
-    if samples.len() != expected_sample_count {
-        return Err(InvalidRender(format!(
-            "WAV sample count does not match configured frame count: expected {expected_sample_count}, got {}",
-            samples.len(),
-        )));
-    }
-
-    if let Some((frame, sample)) = samples
-        .iter()
-        .copied()
-        .enumerate()
-        .find(|(_, sample)| !sample.is_finite())
-    {
-        return Err(InvalidRender(format!(
-            "cannot write non-finite WAV sample at frame {frame}: {sample}"
-        )));
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -136,7 +106,7 @@ mod tests {
             let error = write_wav(&path, &[0.0, sample, 1.0], &config)
                 .expect_err("non-finite sample should be rejected");
 
-            assert_invalid_render_contains(&error, "non-finite WAV sample at frame 1");
+            assert_invalid_render_contains(&error, "non-finite sample at frame 1");
             assert!(!path.exists(), "invalid input must not create a WAV file");
         }
     }

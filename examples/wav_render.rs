@@ -7,7 +7,7 @@ use datafusion::{
 use sonicfusion::{
     RenderConfig, decode_from_frames,
     physical::frame::{FrameGainExec, FrameSineOscExec},
-    write_wav,
+    write_wav, write_waveform_svg,
 };
 
 #[tokio::main]
@@ -27,9 +27,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let output_directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target/sonic-fusion/representation-lab");
     std::fs::create_dir_all(&output_directory)?;
-    let output_path = output_directory.join("frame.wav");
-    write_wav(&output_path, &samples, &config)?;
+    let wav_path = output_directory.join("frame.wav");
+    let waveform_path = output_directory.join("frame.svg");
+    write_wav(&wav_path, &samples, &config)?;
+    write_waveform_svg(&waveform_path, &samples, &config)?;
 
-    println!("Successfully wrote {}", output_path.display());
+    println!("Successfully wrote {}", wav_path.display());
+    println!("Successfully wrote {}", waveform_path.display());
     Ok(())
 }

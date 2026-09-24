@@ -403,7 +403,7 @@ flowchart TB
 
 ---
 
-- [ ] U4. **Produce WAV and waveform feedback from one render**
+- [x] U4. **Produce WAV and waveform feedback from one render**
 
 **Goal:** Turn one canonical sample vector into audible and visual artifacts without rerunning the DataFusion plan.
 
