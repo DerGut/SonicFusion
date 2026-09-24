@@ -78,7 +78,7 @@ impl ExecutionPlan for FrameGainExec {
         let new_input = Arc::clone(&children[0]);
 
         if new_input.schema() != self.schema() {
-            return Err(datafusion::error::DataFusionError::Plan(format!(
+            return Err(DataFusionError::Plan(format!(
                 "FrameGainExec expected input schema to be {:?}, but got {:?}",
                 self.schema(),
                 new_input.schema()
