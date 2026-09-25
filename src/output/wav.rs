@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn wav_header_describes_mono_float_audio() {
         let config = test_config(3);
-        let samples = [1.0, 2.0, 3.0];
+        let samples = [1.0, 0.5, -1.0];
         let directory = tempdir().expect("temporary directory should be created");
         let path = directory.path().join("header.wav");
 
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn wav_round_trip_preserves_float_samples_without_normalization() {
         let config = test_config(5);
-        let samples = [1.0, 2.0, 3.0, 1.5, -2.0];
+        let samples = [1.0, 0.5, 0.0, -0.5, -1.0];
         let directory = tempdir().expect("temporary directory should be created");
         let path = directory.path().join("round-trip.wav");
 
@@ -157,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn streaming_wav_matches_collected_decoder_for_different_batch_sizes() {
         let config = test_config(11);
-        let expected: Vec<f32> = (0..11).map(|frame| frame as f32 * 0.25 - 1.0).collect();
+        let expected: Vec<f32> = (0..11).map(|frame| frame as f32 * 0.2 - 1.0).collect();
         let directory = tempdir().unwrap();
         for batch_size in [1, 3, 4, 11] {
             let batches: Vec<_> = (0..11)
@@ -229,6 +229,15 @@ mod tests {
                     vec![0.0, 0.0, f32::NAN, 0.0],
                 ))],
                 "non-finite sample at frame 2",
+            ),
+            (
+                "outofrange",
+                vec![Ok(frame_batch(
+                    &config,
+                    vec![0, 1, 2, 3],
+                    vec![0.0, 0.0, 1.01, 0.0],
+                ))],
+                "out-of-range sample at frame 2",
             ),
             (
                 "early",
@@ -337,6 +346,16 @@ mod tests {
     }
 
     #[test]
+    fn out_of_range_samples_fail_before_creating_the_destination() {
+        let config = test_config(3);
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("out-of-range.wav");
+        let error = write_wav(&path, &[0.0, 1.01, 0.0], &config).unwrap_err();
+        assert_invalid_render_contains(&error, "out-of-range sample at frame 1");
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn invalid_destination_returns_the_path_and_underlying_error() {
         let config = test_config(3);
         let directory = tempdir().expect("temporary directory should be created");
@@ -374,7 +393,7 @@ mod tests {
             .expect("long WAV metadata should be readable")
             .len();
 
-        let replacement = [1.5, -2.0];
+        let replacement = [1.0, -1.0];
         write_wav(&path, &replacement, &short_config).expect("WAV should be overwritten");
         let short_file_size = std::fs::metadata(&path)
             .expect("short WAV metadata should be readable")

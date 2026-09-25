@@ -160,7 +160,7 @@ mod tests {
         let frame_count = DRAWABLE_WIDTH * 3 + 17;
         let config = test_config(frame_count as u64);
         let mut samples = vec![0.0; frame_count];
-        samples[frame_count / 2] = 2.0;
+        samples[frame_count / 2] = 1.0;
         let directory = tempdir().expect("temporary directory should be created");
         let path = directory.path().join("bucketed.svg");
 
@@ -177,14 +177,14 @@ mod tests {
         );
         assert_eq!(
             element_attribute(&svg, "waveform", "data-amplitude-scale"),
-            "2.000000"
+            "1.000000"
         );
     }
 
     #[test]
-    fn high_magnitude_samples_produce_only_finite_coordinates() {
+    fn full_range_samples_produce_only_finite_coordinates() {
         let config = test_config(5);
-        let samples = [0.0, 1.5, -2.0, 0.5, 0.0];
+        let samples = [0.0, 1.0, -1.0, 0.5, 0.0];
         let directory = tempdir().expect("temporary directory should be created");
         let path = directory.path().join("high-magnitude.svg");
 
@@ -194,7 +194,7 @@ mod tests {
 
         assert_eq!(
             element_attribute(&svg, "waveform", "data-amplitude-scale"),
-            "2.000000"
+            "1.000000"
         );
         assert!(!lowercase_svg.contains("nan"), "{svg}");
         assert!(!lowercase_svg.contains("inf"), "{svg}");
@@ -216,6 +216,12 @@ mod tests {
             .expect_err("non-finite sample should be rejected");
         assert_invalid_render_contains(&non_finite_error, "frame 1");
         assert!(!non_finite_path.exists());
+
+        let out_of_range_path = directory.path().join("out-of-range.svg");
+        let error = write_waveform_svg(&out_of_range_path, &[0.0, 1.01, 0.0], &config)
+            .expect_err("out-of-range sample should be rejected");
+        assert_invalid_render_contains(&error, "out-of-range sample at frame 1");
+        assert!(!out_of_range_path.exists());
     }
 
     #[test]
@@ -254,7 +260,7 @@ mod tests {
             .expect("long SVG metadata should be readable")
             .len();
 
-        write_waveform_svg(&path, &[1.5, -2.0], &short_config).expect("SVG should be overwritten");
+        write_waveform_svg(&path, &[1.0, -1.0], &short_config).expect("SVG should be overwritten");
         let short_file_size = std::fs::metadata(&path)
             .expect("short SVG metadata should be readable")
             .len();

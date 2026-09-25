@@ -1,14 +1,32 @@
 mod gain;
 mod low_pass_filter;
 mod mix;
+mod plan;
 mod sine;
 mod square;
 
 pub use gain::FrameGainExec;
-pub use low_pass_filter::FrameLowPassFilterExec;
+pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass};
 pub use mix::FrameMixExec;
+pub use plan::FramePlan;
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
+
+/// Frame signals carry finite, unitless bipolar samples in [-1, 1].
+fn validate_sample(sample: f32, frame: u64, source: &str) -> datafusion::error::Result<()> {
+    use datafusion::error::DataFusionError;
+    if !sample.is_finite() {
+        return Err(DataFusionError::Execution(format!(
+            "{source} non-finite sample at frame {frame}: {sample}"
+        )));
+    }
+    if !(-1.0..=1.0).contains(&sample) {
+        return Err(DataFusionError::Execution(format!(
+            "{source} out-of-range sample at frame {frame}: {sample}"
+        )));
+    }
+    Ok(())
+}
 
 fn frame_ordering() -> [datafusion::physical_expr::PhysicalSortExpr; 1] {
     use std::sync::Arc;

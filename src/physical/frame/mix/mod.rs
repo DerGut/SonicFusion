@@ -28,9 +28,7 @@ use crate::{
 /// Mixes matching frames from all inputs. An input that ends contributes silence;
 /// output ends only after every input has ended.
 ///
-/// Mixing does not clip samples. Apply a master gain after mixing to keep the
-/// rendered signal within the intended -1.0..=1.0 range. The render/output path
-/// does not currently enforce that range.
+/// Mixed samples saturate to the shared frame-signal range [-1, 1].
 #[derive(Debug)]
 pub struct FrameMixExec {
     inputs: Vec<Arc<dyn ExecutionPlan>>,
@@ -168,7 +166,7 @@ impl ExecutionPlan for FrameMixExec {
                     match cursor.next_frame().await? {
                         Some((frame, aligned_samples)) => {
                             frames.push(frame);
-                            samples.push(mix(aligned_samples, &gains));
+                            samples.push(mix(frame, aligned_samples, &gains)?);
                         }
                         None => break,
                     }
@@ -209,13 +207,15 @@ impl DisplayAs for FrameMixExec {
 
 // Mixes samples from different sources at the same frame according to their
 // individual gains.
-// No clipping. A master gain should be applied afterwards.
-fn mix(samples: &[Option<f32>], gains: &[f32]) -> f32 {
-    samples
-        .iter()
-        .zip(gains)
-        .map(|(sample, gain)| sample.unwrap_or(0.0) * gain)
-        .sum()
+fn mix(frame: u64, samples: &[Option<f32>], gains: &[f32]) -> Result<f32> {
+    let mut sum = 0.0_f64;
+    for (sample, gain) in samples.iter().zip(gains) {
+        if let Some(sample) = sample {
+            super::validate_sample(*sample, frame, "FrameMixExec input")?;
+            sum += f64::from(*sample) * f64::from(*gain);
+        }
+    }
+    Ok(sum.clamp(-1.0, 1.0) as f32)
 }
 
 pub(crate) fn emission_type_from_inputs<'a>(
@@ -286,6 +286,7 @@ mod tests {
             execution_plan::{Boundedness, EmissionType},
             limit::GlobalLimitExec,
             sorts::sort::SortExec,
+            test::TestMemoryExec,
         },
     };
 
@@ -294,6 +295,15 @@ mod tests {
         layout::frame::frame_schema,
         physical::frame::{FrameGainExec, FrameMixExec, FrameSineOscExec, FrameSquareOscExec},
     };
+
+    #[test]
+    fn mix_saturates_after_wide_arithmetic() {
+        assert_eq!(super::mix(0, &[Some(1.0)], &[f32::MAX]).unwrap(), 1.0);
+        assert_eq!(
+            super::mix(0, &[Some(1.0), Some(-1.0)], &[f32::MAX, f32::MAX]).unwrap(),
+            0.0
+        );
+    }
 
     #[test]
     fn mix_rejects_invalid_inputs() {
@@ -330,6 +340,32 @@ mod tests {
                 Err(DataFusionError::Plan(message)) if message.contains("gain at input 0 must be finite")
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn mix_rejects_invalid_child_samples() -> Result<()> {
+        let config = RenderConfig::default();
+        for sample in [f32::NAN, 1.01, -1.01] {
+            let batch = RecordBatch::try_new(
+                frame_schema(&config),
+                vec![
+                    Arc::new(UInt64Array::from(vec![4])),
+                    Arc::new(Float32Array::from(vec![sample])),
+                ],
+            )?;
+            let source = Arc::new(TestMemoryExec::try_new(
+                &[vec![batch]],
+                frame_schema(&config),
+                None,
+            )?);
+            let mix: Arc<dyn ExecutionPlan> =
+                Arc::new(FrameMixExec::try_new(&config, vec![source], vec![0.0])?);
+            let error = collect(mix, Arc::new(TaskContext::default()))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("frame 4"), "{error}");
+        }
+        Ok(())
     }
 
     #[test]
@@ -410,7 +446,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         for (frame, sample) in samples.into_iter().enumerate() {
-            let expected = dsp::sine_at_frame(frame as u64, 8, 2.0) * -2.0;
+            let expected = (dsp::sine_at_frame(frame as u64, 8, 2.0) * -2.0).clamp(-1.0, 1.0);
             assert!((sample - expected).abs() < 1e-5);
         }
         Ok(())
@@ -496,14 +532,12 @@ mod tests {
             } else {
                 0.0
             };
-            let expected = first + second;
+            let expected = (first + second).clamp(-1.0, 1.0);
             assert!(
                 (sample - expected).abs() < 1e-5,
                 "frame {frame}: {sample} != {expected}"
             );
-            if frame == 2 {
-                assert!(sample < -1.0, "mixed sample should not be clipped");
-            }
+            assert!((-1.0..=1.0).contains(&sample));
         }
         Ok(())
     }

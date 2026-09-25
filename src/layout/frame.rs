@@ -4,7 +4,9 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 
 use crate::RenderConfig;
 
-pub(crate) fn frame_schema(config: &RenderConfig) -> SchemaRef {
+/// Exact mono frame-signal schema, including sample-rate and layout metadata.
+/// Frame samples are finite, unitless values in [-1, 1].
+pub fn frame_schema(config: &RenderConfig) -> SchemaRef {
     SchemaRef::new(frame_schema_val(config))
 }
 
