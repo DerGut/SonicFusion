@@ -83,6 +83,11 @@ impl ExecutionPlan for FrameGainExec {
         vec![true]
     }
 
+    fn benefits_from_input_partitioning(&self) -> Vec<bool> {
+        // A frame signal's timeline must remain intact for downstream stateful nodes.
+        vec![false]
+    }
+
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,

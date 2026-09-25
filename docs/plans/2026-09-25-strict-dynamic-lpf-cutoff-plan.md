@@ -27,8 +27,10 @@ The filter currently takes one `Arc<dyn ExecutionPlan>` audio child and a consta
 
 - Keep the audio child as the driver. Emit exactly its frame numbers, in order. End when audio ends; an unbounded modulation child must not extend the output or be drained after the last audio row.
 - Use the existing non-null `frame: UInt64`, `sample: Float32` frame schema for both children. Any oscillator or other frame signal can be the modulation source. Validate schema compatibility at construction and after child replacement. Require one partition at initial construction and execution; a child rewrite may temporarily introduce multiple partitions while DataFusion inserts a coalescing plan.
-- The LPF cutoff port maps a normalized sample `m[n]` to `cutoff_hz[n] = base_hz + depth_hz * m[n]`, so the two range endpoints map to `base_hz - depth_hz` and `base_hz + depth_hz`. Validate finite base and depth and require both mapped endpoints to be strictly between zero and Nyquist at construction; a zero depth is allowed. The constant path retains its direct `cutoff_hz` value. The port owns the interpretation in hertz; the source remains a unitless frame signal.
+- The LPF cutoff port maps a normalized sample `m[n]` to `cutoff_hz[n] = base_hz + depth_hz * m[n]`, so the two range endpoints map to `base_hz - depth_hz` and `base_hz + depth_hz`. Validate finite base and depth and require both mapped endpoints to be strictly between zero and Nyquist at construction. Zero depth produces a flat cutoff; negative depth reverses the modulation direction. The constant path retains its direct `cutoff_hz` value. The port owns the interpretation in hertz; the source remains a unitless frame signal.
 - Require modulation rows for every integer frame from 0 through the last emitted audio frame. A row may be in any batch, but its frame numbers must start at 0 and increase by exactly one. Reject an early end, gap, duplicate, or out-of-order row with the expected and observed frame numbers. Do not require a modulation row when audio is empty, and ignore modulation rows beyond the final audio frame.
+- Validate row order as delivered to the LPF. Do not request input ordering from DataFusion: an optimizer-inserted sort can conceal an out-of-order stream, buffer a bounded source, or wait forever for an unbounded source. The LPF must consume either child incrementally even when that child's plan does not advertise ordering. An explicitly sorted upstream plan is responsible for its own source rows; the LPF validates the rows it receives.
+- Preserve the frame timeline through built-in upstream nodes: in particular, gain must not invite DataFusion to repartition a single ordered stream and coalesce its partitions in arrival order. Custom upstream plans must likewise preserve the order of rows they deliver; the LPF rejects a reordered stream at execution.
 - Validate each consumed modulation sample as finite and within `[-1, 1]`, then validate its resulting cutoff as finite and strictly between zero and Nyquist. Report the frame and invalid value as an execution error; do not silently clamp invalid child data inside the LPF. Keep constant-cutoff validation at construction.
 - Audio frames retain their current strictly increasing and non-null checks and must satisfy the common value range. Missing audio frames represent zero input to the filter; they do not produce output rows. For every frame in an audio gap, consume that frame's modulation sample and advance the state with zero input.
 
@@ -50,7 +52,7 @@ Only start this phase after Phase 1's range contract passes. The LPF consumes th
 
 #### Define the cutoff mapping
 
-- Introduce the `FrameSignal` graph wrapper sketched below, validating the exact frame schema when a plan enters the builder. Keep DataFusion child plans erased internally.
+- Introduce the `FramePlan` graph wrapper sketched below, validating the exact frame schema when a plan enters the builder. Keep DataFusion child plans erased internally.
 - Document the common bipolar input range and the linear base-and-depth mapping. Default to 1,000 Hz base and 900 Hz depth where the sample rate permits; at lower rates, cap the base at half Nyquist and the depth at 90% of the base. Use the existing sine oscillator directly as the modulation child; its frequency may be below or within the audible range.
 - Keep constants in the filter's plan state. A constant emitter is optional for graph editing but is not required for execution.
 
@@ -59,7 +61,7 @@ Only start this phase after Phase 1's range contract passes. The LPF consumes th
 #### Extend the LPF without changing constant behavior
 
 - Represent the cutoff internally as constant data or a modulation child plus base and depth. The dynamic variant has children ordered `[audio, modulation]`; the constant variant retains `[audio]`. `with_new_children()` must preserve this distinction, check child count and schemas, and rebuild properties after DataFusion rewrites.
-- Declare single-partition distribution and frame ordering requirements for both dynamic children, and check actual partition counts at execution. Derive output schema, partitioning, ordering, and boundedness from the audio child; the modulation child's duration must not determine output duration. Account for both children when describing execution behavior to DataFusion.
+- Declare single-partition distribution requirements for both dynamic children, but no input ordering requirement; check actual partition counts at execution and validate frame order while consuming rows. Derive output schema, partitioning, ordering, and boundedness from the audio child; the modulation child's duration must not determine output duration. Account for both children when describing execution behavior to DataFusion.
 - Pull modulation frames only as far as each audio frame requires. Advance the filter once per intervening frame, using zero audio input for gaps, and emit rows only for actual audio frames. Preserve streaming execution and bounded working memory.
 - Keep the existing constant implementation efficient: it can continue using a precomputed coefficient and exponentiation across audio gaps.
 
@@ -69,14 +71,14 @@ Only start this phase after Phase 1's range contract passes. The LPF consumes th
 
 - Compare constant and flat dynamic cutoff outputs on an impulse across multiple batches and an audio gap. Add a hand-calculated changing-cutoff fixture whose coefficient changes inside a gap, then exercise low- and audio-rate oscillator modulation.
 - Exercise mismatched batch boundaries, empty audio, modulation ending early, first modulation frame other than zero, missing, duplicate and out-of-order modulation frames, non-finite and out-of-range samples, invalid mapping endpoints, and upstream errors.
-- Run the DataFusion distribution and sorting optimizers on a dynamic filter. Verify that both child positions survive `with_new_children()`, state stays continuous, and output rows follow only the audio child.
+- Run the DataFusion distribution and sorting optimizers on a dynamic filter. Verify that both child positions survive `with_new_children()`, state stays continuous, and output rows follow only the audio child. With an unordered finite child, verify the optimizer does not insert a sort and the first out-of-order row still fails. With an unbounded child that does not advertise ordering, verify the optimized filter produces its first output batch without waiting for the modulation source to end.
 - Run focused tests, formatting, Clippy, and `git diff --check`.
 
 **Done when:** each malformed modulation stream fails at the first offending frame, valid streams are independent of batch boundaries, and the optimizer retains the same rendered samples.
 
 ## Stricter Graph API Sketch
 
-The graph-facing API should accept one kind of `FrameSignal` for audio and modulation. It wraps an `Arc<dyn ExecutionPlan>` and validates the plan's output schema when the plan enters the graph. A marker trait such as `FrameNode: ExecutionPlan` does not by itself enforce `ExecutionPlan::schema()`; a fallible wrapper constructor makes that check unavoidable in the graph-facing API.
+The graph-facing API should accept one kind of `FramePlan` for audio and modulation. It wraps an `Arc<dyn ExecutionPlan>` and validates the plan's output schema when the plan enters the graph. A marker trait such as `FrameNode: ExecutionPlan` does not by itself enforce `ExecutionPlan::schema()`; a fallible wrapper constructor makes that check unavoidable in the graph-facing API.
 
 Pin the current `frame_schema(config)` as the contract: exactly two ordered, non-null fields, `frame: UInt64` and `sample: Float32`; schema metadata `audio.sample_rate_hz` equal to the configuration, `audio.channels=1`, and `audio.layout=frame`. Compare the full schema, including metadata, so a signal from another sample rate cannot be wired in by accident. The `audio.*` keys are existing timing and layout keys, not a restriction on whether a signal may be used for modulation. Make the schema helper available to authors of custom frame plans, rather than requiring them to duplicate those keys.
 
@@ -101,7 +103,7 @@ pub fn low_pass(config: &RenderConfig, audio: FramePlan, cutoff: Cutoff)
     -> datafusion::error::Result<FramePlan>;
 ```
 
-These signatures are a sketch, not a commitment to names. The graph API uses the default base/depth mapping, keeps constants as values, and allows the same oscillator signal to feed either LPF input. The `FrameSignal` check proves schema compatibility at construction; it cannot prove frame ordering, density, or sample range without executing the stream. Nodes must validate the rows they consume, and the output decoder remains a final guard. DataFusion still passes `Arc<dyn ExecutionPlan>` to `with_new_children()`, so each physical node must revalidate replacement children after optimizer rewrites.
+These signatures are a sketch, not a commitment to names. The graph API uses the default base/depth mapping, keeps constants as values, and allows the same oscillator signal to feed either LPF input. The `FramePlan` check proves schema compatibility at construction; it cannot prove frame ordering, density, or sample range without executing the stream. Nodes must validate the rows they consume, and the output decoder remains a final guard. DataFusion still passes `Arc<dyn ExecutionPlan>` to `with_new_children()`, so each physical node must revalidate replacement children after optimizer rewrites.
 
 Add no new range or unit metadata to signal outputs or LPF inputs. Every frame signal has the same value range and no unit; the LPF converts a sample to hertz internally. The existing sample-rate metadata stays because it distinguishes incompatible frame timelines.
 

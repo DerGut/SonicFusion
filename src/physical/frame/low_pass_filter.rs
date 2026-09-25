@@ -7,7 +7,7 @@ use datafusion::{
     },
     error::{DataFusionError, Result},
     execution::{SendableRecordBatchStream, TaskContext},
-    physical_expr::{EquivalenceProperties, LexOrdering, OrderingRequirements},
+    physical_expr::EquivalenceProperties,
     physical_plan::{
         DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
         PlanProperties, stream::RecordBatchStreamAdapter,
@@ -387,15 +387,8 @@ impl ExecutionPlan for FrameLowPassFilterExec {
         vec![Distribution::SinglePartition; self.children().len()]
     }
 
-    fn required_input_ordering(&self) -> Vec<Option<OrderingRequirements>> {
-        vec![
-            Some(OrderingRequirements::from(LexOrdering::from(
-                super::frame_ordering(),
-            )));
-            self.children().len()
-        ]
-    }
-
+    // Row order is checked while consuming each stream. Requiring it here would
+    // let DataFusion insert a blocking sort that conceals malformed input.
     fn maintains_input_order(&self) -> Vec<bool> {
         vec![true; self.children().len()]
     }
@@ -583,7 +576,7 @@ impl DisplayAs for FrameLowPassFilterExec {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use super::default_cutoff_mapping;
     use crate::{
@@ -598,17 +591,83 @@ mod tests {
         arrow::array::{Float32Array, RecordBatch, UInt64Array},
         common::config::ConfigOptions,
         error::{DataFusionError, Result},
-        execution::TaskContext,
+        execution::{SendableRecordBatchStream, TaskContext},
+        physical_expr::EquivalenceProperties,
         physical_optimizer::{
             enforce_distribution::EnforceDistribution,
             enforce_sorting::EnforceSorting,
             optimizer::{PhysicalOptimizer, PhysicalOptimizerRule},
         },
         physical_plan::{
-            Distribution, ExecutionPlan, ExecutionPlanProperties, collect, displayable,
-            execution_plan::Boundedness, limit::GlobalLimitExec, test::TestMemoryExec,
+            DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
+            PlanProperties, collect, displayable, execution_plan::Boundedness,
+            limit::GlobalLimitExec, test::TestMemoryExec,
         },
     };
+    use futures::StreamExt;
+
+    /// A streaming source that deliberately does not advertise its actual ordering.
+    #[derive(Debug)]
+    struct UnorderedSignalExec {
+        input: Arc<dyn ExecutionPlan>,
+        properties: Arc<PlanProperties>,
+    }
+
+    impl UnorderedSignalExec {
+        fn new(input: Arc<dyn ExecutionPlan>) -> Self {
+            let properties = Arc::new(PlanProperties::new(
+                EquivalenceProperties::new(input.schema()),
+                input.output_partitioning().clone(),
+                input.pipeline_behavior(),
+                input.boundedness(),
+            ));
+            Self { input, properties }
+        }
+    }
+
+    impl DisplayAs for UnorderedSignalExec {
+        fn fmt_as(&self, _: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(f, "UnorderedSignalExec")
+        }
+    }
+
+    impl ExecutionPlan for UnorderedSignalExec {
+        fn name(&self) -> &str {
+            "UnorderedSignalExec"
+        }
+
+        fn properties(&self) -> &Arc<PlanProperties> {
+            &self.properties
+        }
+
+        fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+            vec![&self.input]
+        }
+
+        fn maintains_input_order(&self) -> Vec<bool> {
+            vec![true]
+        }
+
+        fn with_new_children(
+            self: Arc<Self>,
+            children: Vec<Arc<dyn ExecutionPlan>>,
+        ) -> Result<Arc<dyn ExecutionPlan>> {
+            if children.len() != 1 {
+                return Err(DataFusionError::Internal(
+                    "UnorderedSignalExec requires one child".into(),
+                ));
+            }
+            Ok(Arc::new(Self::new(Arc::clone(&children[0]))))
+        }
+
+        fn execute(
+            &self,
+            partition: usize,
+            context: Arc<TaskContext>,
+        ) -> Result<SendableRecordBatchStream> {
+            self.input.execute(partition, context)
+        }
+    }
 
     fn config() -> RenderConfig {
         RenderConfig::builder()
@@ -770,12 +829,9 @@ mod tests {
         let distributed = EnforceDistribution::new().optimize(plan, &options)?;
         let optimized = EnforceSorting::new().optimize(distributed, &options)?;
         assert_eq!(optimized.output_partitioning().partition_count(), 1);
-        assert!(
-            displayable(optimized.as_ref())
-                .indent(false)
-                .to_string()
-                .contains("SortExec")
-        );
+        let display = displayable(optimized.as_ref()).indent(false).to_string();
+        assert!(!display.contains("RepartitionExec"), "{display}");
+        assert!(!display.contains("SortExec"), "{display}");
 
         let batches = collect(optimized, Arc::new(TaskContext::default())).await?;
         let samples = batches
@@ -1117,7 +1173,7 @@ mod tests {
         )?);
         assert_eq!(filter.required_input_distribution().len(), 2);
         assert_eq!(filter.required_input_ordering().len(), 2);
-        assert!(filter.required_input_ordering().iter().all(Option::is_some));
+        assert!(filter.required_input_ordering().iter().all(Option::is_none));
         assert!(filter.maintains_input_order().iter().all(|value| *value));
         assert!(
             filter
@@ -1163,6 +1219,90 @@ mod tests {
         assert_eq!(optimized.boundedness(), Boundedness::Bounded);
         let actual = rows(&collect(optimized, Arc::new(TaskContext::default())).await?);
         assert_eq!(actual, expected);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn optimizer_keeps_out_of_order_child_rows_visible_to_filter() -> Result<()> {
+        let config = config();
+        let mut options = ConfigOptions::new();
+        options.execution.target_partitions = 2;
+        options.optimizer.repartition_file_scans = false;
+
+        for invalid_audio in [false, true] {
+            let audio_frames = if invalid_audio {
+                vec![0, 2, 1]
+            } else {
+                vec![0, 1, 2]
+            };
+            let modulation_frames = if invalid_audio {
+                vec![0, 1, 2]
+            } else {
+                vec![0, 2, 1]
+            };
+            let audio = input(
+                &config,
+                vec![vec![batch(&config, audio_frames, vec![0.0; 3])]],
+            );
+            let modulation = input(
+                &config,
+                vec![vec![batch(&config, modulation_frames, vec![0.0; 3])]],
+            );
+            let filter: Arc<dyn ExecutionPlan> = Arc::new(
+                FrameLowPassFilterExec::try_new_modulated(&config, audio, modulation, 1.0, 0.0)?,
+            );
+            let distributed = EnforceDistribution::new().optimize(filter, &options)?;
+            let optimized = EnforceSorting::new().optimize(distributed, &options)?;
+            assert!(
+                !displayable(optimized.as_ref())
+                    .indent(false)
+                    .to_string()
+                    .contains("SortExec")
+            );
+            let error = collect(optimized, Arc::new(TaskContext::default()))
+                .await
+                .unwrap_err();
+            let expected = if invalid_audio {
+                "input frames must increase: 1 follows 2"
+            } else {
+                "modulation expected frame 1, got 2"
+            };
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn optimizer_streams_from_unbounded_modulation_without_declared_order() -> Result<()> {
+        let config = config();
+        let audio = input(
+            &config,
+            vec![vec![batch(&config, vec![0, 1, 2], vec![1.0, 0.0, 0.0])]],
+        );
+        let sine: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::try_new(&config, 1.0)?);
+        let modulation: Arc<dyn ExecutionPlan> = Arc::new(UnorderedSignalExec::new(sine));
+        assert!(modulation.output_ordering().is_none());
+        assert!(modulation.boundedness().is_unbounded());
+        let filter: Arc<dyn ExecutionPlan> = Arc::new(FrameLowPassFilterExec::try_new_modulated(
+            &config, audio, modulation, 1.0, 0.5,
+        )?);
+        let mut options = ConfigOptions::new();
+        options.execution.target_partitions = 2;
+        options.optimizer.repartition_file_scans = false;
+        let distributed = EnforceDistribution::new().optimize(filter, &options)?;
+        let optimized = EnforceSorting::new().optimize(distributed, &options)?;
+        assert!(
+            !displayable(optimized.as_ref())
+                .indent(false)
+                .to_string()
+                .contains("SortExec")
+        );
+        let mut stream = optimized.execute(0, Arc::new(TaskContext::default()))?;
+        let first = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("the first audio batch must not wait for modulation to end")
+            .expect("the audio child has one batch")?;
+        assert_eq!(rows(&[first]).len(), 3);
         Ok(())
     }
 
