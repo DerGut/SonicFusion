@@ -10,6 +10,16 @@ pub use mix::FrameMixExec;
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
 
+fn frame_ordering() -> [datafusion::physical_expr::PhysicalSortExpr; 1] {
+    use std::sync::Arc;
+
+    use datafusion::physical_expr::{PhysicalSortExpr, expressions::Column};
+
+    [PhysicalSortExpr::new_default(Arc::new(Column::new(
+        "frame", 0,
+    )))]
+}
+
 fn validate_frequency(
     frequency_hz: f64,
     sample_rate_hz: u32,

@@ -35,8 +35,10 @@ impl FrameSquareOscExec {
                 "pulse_width must be finite and between 0 and 1 inclusive".into(),
             ));
         }
+        let mut equivalence = EquivalenceProperties::new(frame_schema(config));
+        equivalence.add_ordering(super::frame_ordering());
         let properties = Arc::new(PlanProperties::new(
-            EquivalenceProperties::new(frame_schema(config)),
+            equivalence,
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Unbounded {
