@@ -14,7 +14,7 @@ use datafusion::execution::TaskContext;
 use futures::TryStreamExt;
 use sonicfusion::{FrameDecoder, RenderConfig, write_streaming_wav, write_wav, write_waveform_svg};
 
-use dag::build_plan;
+use dag::DEFAULT_GRAPH;
 
 #[derive(Debug)]
 struct Options {
@@ -23,6 +23,7 @@ struct Options {
     output_dir: PathBuf,
     player: String,
     player_args: Vec<String>,
+    graph: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -52,7 +53,7 @@ enum PreviewError {
 }
 
 fn usage() -> &'static str {
-    "Usage: scripts/preview [--seconds SECONDS] [--waveform] [--output-dir DIR] [--player COMMAND] [--player-arg ARG]...\n\
+    "Usage: scripts/preview [--graph FILE] [--seconds SECONDS] [--waveform] [--output-dir DIR] [--player COMMAND] [--player-arg ARG]...\n\
      Default player: afplay on macOS, ffplay -nodisp -autoexit on Linux.\n\
      The rendered WAV path is always passed as the final player argument."
 }
@@ -64,12 +65,14 @@ fn parse_options() -> Result<Options, PreviewError> {
         output_dir: Path::new(env!("CARGO_MANIFEST_DIR")).join("target/sonic-fusion/preview"),
         player: String::new(),
         player_args: Vec::new(),
+        graph: None,
     };
     let mut args = env::args().skip(1);
     let mut custom_player = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--graph" => options.graph = Some(PathBuf::from(next_value(&mut args, &arg)?)),
             "--seconds" => {
                 let value = next_value(&mut args, &arg)?;
                 options.seconds = value.parse().map_err(|_| {
@@ -160,8 +163,13 @@ async fn run() -> Result<(), PreviewError> {
         .build()
         .map_err(|error| PreviewError::Arguments(error.to_string()))?;
 
+    let graph = match &options.graph {
+        Some(path) => std::fs::read_to_string(path).map_err(|error| file_error(path, error))?,
+        None => DEFAULT_GRAPH.to_string(),
+    };
     let graph_started = Instant::now();
-    let plan = build_plan(&config).map_err(PreviewError::Graph)?;
+    let plan = sonicfusion::dsl::build_plan(&graph, &config)
+        .map_err(|error| PreviewError::Graph(Box::new(error)))?;
     show_time("Graph construction", graph_started.elapsed());
 
     let file_started = Instant::now();

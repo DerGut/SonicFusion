@@ -1,0 +1,4 @@
+# Edit this file and rerun scripts/preview --graph examples/graphs/two-tone.sf
+sine(440.0) -> $high;
+sine(220.0) -> $low;
+mix([$high, $low], [0.4, 0.6]) -> lpf(1000.0) -> gain(0.5) -> out
