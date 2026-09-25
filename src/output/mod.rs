@@ -22,15 +22,17 @@ fn validate_samples(samples: &[f32], config: &RenderConfig) -> Result<()> {
         )));
     }
 
-    if let Some((frame, sample)) = samples
-        .iter()
-        .copied()
-        .enumerate()
-        .find(|(_, sample)| !sample.is_finite())
-    {
-        return Err(InvalidRender(format!(
-            "cannot write non-finite sample at frame {frame}: {sample}"
-        )));
+    for (frame, &sample) in samples.iter().enumerate() {
+        if !sample.is_finite() {
+            return Err(InvalidRender(format!(
+                "cannot write non-finite sample at frame {frame}: {sample}"
+            )));
+        }
+        if !(-1.0..=1.0).contains(&sample) {
+            return Err(InvalidRender(format!(
+                "cannot write out-of-range sample at frame {frame}: {sample}"
+            )));
+        }
     }
 
     Ok(())

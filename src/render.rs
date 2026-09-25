@@ -138,6 +138,11 @@ impl FrameDecoder {
                 "non-finite sample at frame {actual_frame} in batch {batch_index} row {row_index}"
             )));
         }
+        if !(-1.0..=1.0).contains(&sample) {
+            return Err(InvalidRender(format!(
+                "out-of-range sample at frame {actual_frame} in batch {batch_index} row {row_index}: {sample}"
+            )));
+        }
 
         Ok(())
     }
@@ -325,6 +330,16 @@ mod tests {
 
             assert_invalid_render_contains(&error, "non-finite sample at frame 1");
             assert_invalid_render_contains(&error, "batch 0 row 1");
+        }
+    }
+
+    #[test]
+    fn out_of_range_samples_are_rejected_at_their_absolute_frame() {
+        let config = test_config(3);
+        for sample in [-1.01, 1.01] {
+            let batch = frame_batch(&config, &[0, 1, 2], &[0.0, sample, 1.0]);
+            let error = decode_from_frames(&[batch], &config).unwrap_err();
+            assert_invalid_render_contains(&error, "out-of-range sample at frame 1");
         }
     }
 

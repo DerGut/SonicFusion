@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::{
-    arrow::{
-        array::{Float32Array, RecordBatch},
-        compute::kernels::numeric::mul,
-    },
+    arrow::array::{Array, Float32Array, RecordBatch, UInt64Array},
     error::{DataFusionError, Result},
     execution::{SendableRecordBatchStream, TaskContext},
     physical_expr::EquivalenceProperties,
@@ -17,6 +14,7 @@ use futures::StreamExt;
 
 use crate::{RenderConfig, layout::frame::frame_schema};
 
+/// Multiplies a normalized frame signal and saturates the result to [-1, 1].
 #[derive(Debug)]
 pub struct FrameGainExec {
     input: Arc<dyn ExecutionPlan>,
@@ -114,15 +112,29 @@ impl ExecutionPlan for FrameGainExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         let schema = self.schema();
-        let gain = Float32Array::new_scalar(self.gain);
+        let gain = self.gain;
 
         let stream =
             self.input
                 .execute(partition, context)?
                 .map(move |batch| -> Result<RecordBatch> {
                     let batch = batch?;
+                    if batch.schema() != schema {
+                        return Err(DataFusionError::Execution(
+                            "FrameGainExec received an incompatible batch schema".into(),
+                        ));
+                    }
 
                     let frames = batch.column(0);
+                    let frame_values =
+                        frames
+                            .as_any()
+                            .downcast_ref::<UInt64Array>()
+                            .ok_or_else(|| {
+                                DataFusionError::Execution(
+                                    "FrameGainExec expected UInt64 frames".into(),
+                                )
+                            })?;
                     let samples = batch
                         .column(1)
                         .as_any()
@@ -133,9 +145,21 @@ impl ExecutionPlan for FrameGainExec {
                             )
                         })?;
 
+                    let mut output = Vec::with_capacity(batch.num_rows());
+                    for row in 0..batch.num_rows() {
+                        if frame_values.is_null(row) || samples.is_null(row) {
+                            return Err(DataFusionError::Execution(
+                                "FrameGainExec received a null frame or sample".into(),
+                            ));
+                        }
+                        let frame = frame_values.value(row);
+                        let sample = samples.value(row);
+                        super::validate_sample(sample, frame, "FrameGainExec input")?;
+                        output.push((f64::from(sample) * f64::from(gain)).clamp(-1.0, 1.0) as f32);
+                    }
                     Ok(RecordBatch::try_new(
                         Arc::clone(&schema),
-                        vec![Arc::clone(frames), mul(samples, &gain)?],
+                        vec![Arc::clone(frames), Arc::new(Float32Array::from(output))],
                     )?)
                 });
 
@@ -168,13 +192,13 @@ mod tests {
     use std::sync::Arc;
 
     use datafusion::{
-        arrow::array::{Float32Array, UInt64Array},
+        arrow::array::{Float32Array, RecordBatch, UInt64Array},
         common::assert_contains,
         error::DataFusionError,
         execution::TaskContext,
         physical_plan::{
             ExecutionPlan, ExecutionPlanProperties, collect, displayable,
-            execution_plan::Boundedness, limit::GlobalLimitExec,
+            execution_plan::Boundedness, limit::GlobalLimitExec, test::TestMemoryExec,
         },
     };
 
@@ -193,6 +217,32 @@ mod tests {
             let error = FrameGainExec::try_new(&config, Arc::clone(&source), gain).unwrap_err();
             assert!(error.to_string().contains("gain must be finite"), "{error}");
         }
+    }
+
+    #[tokio::test]
+    async fn gain_rejects_invalid_child_samples() -> datafusion::error::Result<()> {
+        let config = test_config();
+        for sample in [f32::NAN, 1.01, -1.01] {
+            let batch = RecordBatch::try_new(
+                frame_schema(&config),
+                vec![
+                    Arc::new(UInt64Array::from(vec![3])),
+                    Arc::new(Float32Array::from(vec![sample])),
+                ],
+            )?;
+            let source = Arc::new(TestMemoryExec::try_new(
+                &[vec![batch]],
+                frame_schema(&config),
+                None,
+            )?);
+            let gain: Arc<dyn ExecutionPlan> =
+                Arc::new(FrameGainExec::try_new(&config, source, 0.0)?);
+            let error = collect(gain, Arc::new(TaskContext::default()))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("frame 3"), "{error}");
+        }
+        Ok(())
     }
 
     #[tokio::test]
@@ -269,14 +319,14 @@ mod tests {
                         3 => -1.0,
                         _ => unreachable!(),
                     };
-                    unit_sample * gain
+                    (unit_sample * gain).clamp(-1.0, 1.0)
                 })
                 .collect::<Vec<_>>();
 
             assert_samples_approximately_equal(&samples, &expected);
 
             let actual_peak = samples.iter().copied().map(f32::abs).fold(0.0, f32::max);
-            assert_value_approximately_equal(actual_peak, gain.abs(), "peak magnitude");
+            assert_value_approximately_equal(actual_peak, gain.abs().min(1.0), "peak magnitude");
         }
     }
 
