@@ -9,7 +9,8 @@ use datafusion::physical_plan::{ExecutionPlan, limit::GlobalLimitExec};
 use crate::{
     RenderConfig,
     physical::frame::{
-        FrameGainExec, FrameLowPassFilterExec, FrameMixExec, FrameSineOscExec, FrameSquareOscExec,
+        Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSineOscExec, FrameSquareOscExec,
+        low_pass,
     },
 };
 
@@ -168,16 +169,14 @@ fn construct(
                 )?))
             }
         }
-        "gain" | "lpf" => {
+        "gain" => {
             let (input, params) = unary_args(source, at, bindings, incoming, name, args)?;
-            if name == "gain" {
-                let factor = f32_value(source, at, params[0], "gain factor")?;
-                Ok(Arc::new(FrameGainExec::try_new(config, input, factor)?))
-            } else {
-                Ok(Arc::new(FrameLowPassFilterExec::try_new(
-                    config, input, params[0],
-                )?))
-            }
+            let factor = f32_value(source, at, params[0], "gain factor")?;
+            Ok(Arc::new(FrameGainExec::try_new(config, input, factor)?))
+        }
+        "lpf" => {
+            let (input, cutoff) = lpf_args(source, at, config, bindings, incoming, args)?;
+            Ok(low_pass(config, FramePlan::try_from_plan(config, input)?, cutoff)?.into_plan())
         }
         "mix" => {
             let (inputs, gains) = mix_args(source, at, bindings, incoming, args)?;
@@ -239,6 +238,43 @@ fn unary_args(
         return Err(error(source, at, format!("{name} argument must be finite")));
     }
     Ok((input, params))
+}
+
+fn lpf_args(
+    source: &str,
+    at: usize,
+    config: &RenderConfig,
+    bindings: &HashMap<String, Plan>,
+    incoming: Option<Plan>,
+    args: &[Arg],
+) -> Result<(Plan, Cutoff), DslError> {
+    let (input, cutoff_arg) = match (incoming, args) {
+        (Some(input), [cutoff]) => (input, cutoff),
+        (None, [Arg::Ref(input_name), cutoff]) => {
+            (reference(source, at, bindings, input_name)?, cutoff)
+        }
+        _ => {
+            return Err(error(
+                source,
+                at,
+                "lpf expects one input and one numeric or $reference cutoff",
+            ));
+        }
+    };
+    let cutoff = match cutoff_arg {
+        Arg::Number(hz) if hz.is_finite() => Cutoff::ConstantHz(*hz),
+        Arg::Ref(name) => Cutoff::Modulated {
+            cutoff: FramePlan::try_from_plan(config, reference(source, at, bindings, name)?)?,
+        },
+        _ => {
+            return Err(error(
+                source,
+                at,
+                "lpf cutoff must be finite or a $reference",
+            ));
+        }
+    };
+    Ok((input, cutoff))
 }
 
 fn mix_args(
@@ -541,7 +577,10 @@ mod tests {
 
     use crate::{
         RenderConfig, decode_from_frames,
-        physical::frame::{FrameGainExec, FrameLowPassFilterExec, FrameMixExec, FrameSineOscExec},
+        physical::frame::{
+            Cutoff, FrameGainExec, FrameLowPassFilterExec, FrameMixExec, FramePlan,
+            FrameSineOscExec, low_pass,
+        },
     };
 
     use super::build_plan;
@@ -563,6 +602,41 @@ mod tests {
         let filter = Arc::new(FrameLowPassFilterExec::try_new(&config, mix, 3.0).unwrap());
         let gain = Arc::new(FrameGainExec::try_new(&config, filter, 0.5).unwrap());
         let expected = Arc::new(GlobalLimitExec::new(gain, 0, Some(8)));
+        let parsed_batches = collect(parsed, Arc::new(TaskContext::default()))
+            .await
+            .unwrap();
+        let expected_batches = collect(expected, Arc::new(TaskContext::default()))
+            .await
+            .unwrap();
+        assert_eq!(
+            decode_from_frames(&parsed_batches, &config).unwrap(),
+            decode_from_frames(&expected_batches, &config).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn modulated_cutoff_matches_the_rust_plan() {
+        let config = RenderConfig::builder()
+            .sample_rate_hz(8_000)
+            .frame_count(32)
+            .batch_frame_capacity(7)
+            .build()
+            .unwrap();
+        let graph = "sine(400) -> $audio; sine(2) -> $cutoff; \
+                     $audio -> lpf($cutoff) -> out";
+        let parsed = build_plan(graph, &config).unwrap();
+        let audio = Arc::new(FrameSineOscExec::try_new(&config, 400.0).unwrap());
+        let cutoff = Arc::new(FrameSineOscExec::try_new(&config, 2.0).unwrap());
+        let expected = low_pass(
+            &config,
+            FramePlan::try_from_plan(&config, audio).unwrap(),
+            Cutoff::Modulated {
+                cutoff: FramePlan::try_from_plan(&config, cutoff).unwrap(),
+            },
+        )
+        .unwrap()
+        .into_plan();
+        let expected = Arc::new(GlobalLimitExec::new(expected, 0, Some(32)));
         let parsed_batches = collect(parsed, Arc::new(TaskContext::default()))
             .await
             .unwrap();

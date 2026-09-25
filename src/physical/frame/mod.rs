@@ -6,9 +6,9 @@ mod sine;
 mod square;
 
 pub use gain::FrameGainExec;
-pub use low_pass_filter::FrameLowPassFilterExec;
+pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass};
 pub use mix::FrameMixExec;
-pub use plan::{Cutoff, FramePlan, low_pass};
+pub use plan::FramePlan;
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
 
