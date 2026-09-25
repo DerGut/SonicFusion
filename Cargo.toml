@@ -9,8 +9,6 @@ async-stream = "=0.3.6"
 datafusion = "=54.1.0"
 futures = "=0.3.31"
 hound = "=3.5.1"
+tempfile = "=3.20.0"
 thiserror = "=2.0.20"
 tokio = { version = "=1.52.4", features = ["macros", "rt-multi-thread"] }
-
-[dev-dependencies]
-tempfile = "=3.20.0"
