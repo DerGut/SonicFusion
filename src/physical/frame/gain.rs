@@ -42,20 +42,29 @@ impl FrameGainExec {
             )));
         }
 
-        Ok(Self::new(input, gain))
+        Self::new(input, gain)
     }
 
-    fn new(input: Arc<dyn ExecutionPlan>, gain: f32) -> Self {
-        Self {
-            input: Arc::clone(&input),
-            gain,
-            properties: Arc::new(PlanProperties::new(
-                EquivalenceProperties::new(input.schema()),
-                input.output_partitioning().clone(),
-                input.pipeline_behavior(),
-                input.boundedness(),
-            )),
+    fn new(input: Arc<dyn ExecutionPlan>, gain: f32) -> Result<Self> {
+        let mut equivalence = EquivalenceProperties::new(input.schema());
+        let frame_ordering = super::frame_ordering();
+        if input
+            .equivalence_properties()
+            .ordering_satisfy(frame_ordering.clone())?
+        {
+            equivalence.add_ordering(frame_ordering);
         }
+        let properties = Arc::new(PlanProperties::new(
+            equivalence,
+            input.output_partitioning().clone(),
+            input.pipeline_behavior(),
+            input.boundedness(),
+        ));
+        Ok(Self {
+            input,
+            gain,
+            properties,
+        })
     }
 }
 
@@ -70,6 +79,10 @@ impl ExecutionPlan for FrameGainExec {
 
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![&self.input]
+    }
+
+    fn maintains_input_order(&self) -> Vec<bool> {
+        vec![true]
     }
 
     fn with_new_children(
@@ -92,7 +105,7 @@ impl ExecutionPlan for FrameGainExec {
             )));
         }
 
-        Ok(Arc::new(Self::new(new_input, self.gain)))
+        Ok(Arc::new(Self::new(new_input, self.gain)?))
     }
 
     fn execute(

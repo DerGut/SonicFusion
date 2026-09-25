@@ -11,8 +11,8 @@ use datafusion::{
     execution::{SendableRecordBatchStream, TaskContext},
     physical_expr::EquivalenceProperties,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
-        PlanProperties,
+        DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
+        Partitioning, PlanProperties,
         execution_plan::{
             Boundedness::{self, Bounded, Unbounded},
             EmissionType::{self},
@@ -92,8 +92,10 @@ impl FrameMixExec {
         let emission_type = emission_type_from_inputs(inputs.iter());
         let boundedness = boundedness_from_inputs(inputs.iter());
 
+        let mut equivalence = EquivalenceProperties::new(schema);
+        equivalence.add_ordering(super::frame_ordering());
         let properties = Arc::new(PlanProperties::new(
-            EquivalenceProperties::new(schema),
+            equivalence,
             Partitioning::UnknownPartitioning(1),
             emission_type,
             boundedness,
@@ -119,6 +121,10 @@ impl ExecutionPlan for FrameMixExec {
 
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         self.inputs.iter().collect::<Vec<_>>()
+    }
+
+    fn required_input_distribution(&self) -> Vec<Distribution> {
+        vec![Distribution::SinglePartition; self.inputs.len()]
     }
 
     fn with_new_children(

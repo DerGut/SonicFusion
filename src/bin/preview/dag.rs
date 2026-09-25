@@ -3,7 +3,9 @@ use std::{error::Error, sync::Arc};
 use datafusion::physical_plan::{ExecutionPlan, limit::GlobalLimitExec};
 use sonicfusion::{
     RenderConfig,
-    physical::frame::{FrameGainExec, FrameMixExec, FrameSineOscExec, FrameSquareOscExec},
+    physical::frame::{
+        FrameGainExec, FrameLowPassFilterExec, FrameMixExec, FrameSineOscExec, FrameSquareOscExec,
+    },
 };
 
 pub(super) fn build_plan(
@@ -18,7 +20,9 @@ pub(super) fn build_plan(
         vec![0.5, 0.5],
     )?);
 
-    let master_gain = Arc::new(FrameGainExec::try_new(config, mix, 0.5)?);
+    let filter = Arc::new(FrameLowPassFilterExec::try_new(config, mix, 1000.0)?);
+
+    let master_gain = Arc::new(FrameGainExec::try_new(config, filter, 0.5)?);
 
     let limit = usize::try_from(config.frame_count())?;
     Ok(Arc::new(GlobalLimitExec::new(master_gain, 0, Some(limit))))
