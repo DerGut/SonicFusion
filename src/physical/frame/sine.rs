@@ -24,7 +24,7 @@ pub struct FrameSineOscExec {
 
 impl FrameSineOscExec {
     pub fn try_new(config: &RenderConfig, frequency_hz: f64) -> datafusion::error::Result<Self> {
-        super::validate_frequency(frequency_hz, config.sample_rate_hz())?;
+        super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
         let schema = frame_schema(config);
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(schema),
