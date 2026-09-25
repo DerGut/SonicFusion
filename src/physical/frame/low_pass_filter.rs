@@ -19,14 +19,21 @@ use crate::{RenderConfig, layout::frame::frame_schema};
 
 use super::plan::FramePlan;
 
-/// The LPF interprets a normalized cutoff signal as hertz using
-/// `base_hz + depth_hz * sample`. Modulation defaults to 1,000 ± 900 Hz when
-/// the sample rate permits; at lower rates the range scales below Nyquist.
+/// Selects a fixed cutoff or a normalized frame signal to map to hertz.
 pub enum Cutoff {
+    /// A fixed cutoff strictly between zero and Nyquist, in hertz.
     ConstantHz(f64),
+    /// A signal with one finite sample in [-1, 1] at every frame from zero through
+    /// the last audio frame, including audio gaps. Later samples are ignored.
     Modulated { cutoff: FramePlan },
 }
 
+/// Builds a low-pass filter for a schema-compatible frame signal.
+///
+/// Modulation maps each sample to `base_hz + depth_hz * sample`. The default
+/// mapping is 1,000 ± 900 Hz when the sample rate permits; at lower rates it
+/// scales below Nyquist. The audio input and any modulation input must each
+/// have one partition at execution.
 pub fn low_pass(config: &RenderConfig, audio: FramePlan, cutoff: Cutoff) -> Result<FramePlan> {
     let plan = match cutoff {
         Cutoff::ConstantHz(hz) => FrameLowPassFilterExec::try_new(config, audio.into_plan(), hz)?,
@@ -247,6 +254,116 @@ impl FrameLowPassFilterExec {
         }
         Ok(())
     }
+
+    fn execute_constant(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+        alpha: f64,
+        decay: f64,
+    ) -> Result<SendableRecordBatchStream> {
+        let schema = self.schema();
+        let mut state = 0.0_f64;
+        let mut last_frame = None;
+        let stream = self.input.execute(partition, context)?.map(move |batch| {
+            let batch = batch?;
+            let audio = AudioBatch::new(&batch, &schema)?;
+
+            let mut filtered = Vec::with_capacity(batch.num_rows());
+            for row in 0..batch.num_rows() {
+                let (frame, sample) = audio.row(row, last_frame)?;
+                let elapsed = match last_frame {
+                    Some(last) => frame - last,
+                    None => 1,
+                };
+                let retained = if elapsed == 1 {
+                    decay
+                } else {
+                    decay.powf(elapsed as f64)
+                };
+                state = retained * state + alpha * f64::from(sample);
+                filtered.push(state as f32);
+                last_frame = Some(frame);
+            }
+
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::clone(batch.column(0)),
+                    Arc::new(Float32Array::from(filtered)),
+                ],
+            )
+            .map_err(Into::into)
+        });
+
+        Ok(Box::pin(RecordBatchStreamAdapter::new(
+            self.schema(),
+            stream,
+        )))
+    }
+
+    fn execute_modulated(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+        cutoff: &Arc<dyn ExecutionPlan>,
+        base_hz: f64,
+        depth_hz: f64,
+        sample_rate_hz: u32,
+    ) -> Result<SendableRecordBatchStream> {
+        let schema = self.schema();
+        let mut audio = self.input.execute(partition, Arc::clone(&context))?;
+        let modulation = cutoff.execute(partition, context)?;
+        let mut cursor = ModulationCursor::new(modulation, Arc::clone(&schema));
+        let output = async_stream::try_stream! {
+            let mut state = 0.0_f64;
+            let mut last_audio_frame = None;
+            let mut next_frame = 0_u128;
+
+            while let Some(batch) = audio.next().await {
+                let batch = batch?;
+                let audio_batch = AudioBatch::new(&batch, &schema)?;
+                let mut filtered = Vec::with_capacity(batch.num_rows());
+
+                for row in 0..batch.num_rows() {
+                    let (frame, sample) = audio_batch.row(row, last_audio_frame)?;
+                    while next_frame <= u128::from(frame) {
+                        let modulation = cursor.next_sample(next_frame).await?;
+                        let cutoff = mapped_cutoff(
+                            modulation, next_frame, base_hz, depth_hz, sample_rate_hz,
+                        )?;
+                        let exponent = -2.0 * std::f64::consts::PI * cutoff
+                            / f64::from(sample_rate_hz);
+                        let alpha = -exponent.exp_m1();
+                        let decay = exponent.exp();
+
+                        let input = if next_frame == u128::from(frame) {
+                            f64::from(sample)
+                        } else {
+                            0.0
+                        };
+                        state = decay * state + alpha * input;
+                        next_frame += 1;
+                    }
+                    filtered.push(state as f32);
+                    last_audio_frame = Some(frame);
+                }
+
+                yield RecordBatch::try_new(
+                    Arc::clone(&schema),
+                    vec![
+                        Arc::clone(batch.column(0)),
+                        Arc::new(Float32Array::from(filtered)),
+                    ],
+                )?;
+            }
+        };
+
+        Ok(Box::pin(RecordBatchStreamAdapter::new(
+            self.schema(),
+            output,
+        )))
+    }
 }
 
 impl ExecutionPlan for FrameLowPassFilterExec {
@@ -338,113 +455,54 @@ impl ExecutionPlan for FrameLowPassFilterExec {
                 "FrameLowPassFilterExec requires one input partition for each child".into(),
             ));
         }
-        if let CutoffState::Modulated {
-            cutoff,
-            base_hz,
-            depth_hz,
-            sample_rate_hz,
-        } = &self.cutoff
-        {
-            return self.execute_modulated(
+        match &self.cutoff {
+            CutoffState::Constant { alpha, decay, .. } => {
+                self.execute_constant(partition, context, *alpha, *decay)
+            }
+            CutoffState::Modulated {
+                cutoff,
+                base_hz,
+                depth_hz,
+                sample_rate_hz,
+            } => self.execute_modulated(
                 partition,
                 context,
                 cutoff,
                 *base_hz,
                 *depth_hz,
                 *sample_rate_hz,
-            );
+            ),
         }
-        let schema = self.schema();
-        let CutoffState::Constant { alpha, decay, .. } = &self.cutoff else {
-            unreachable!()
-        };
-        let (alpha, decay) = (*alpha, *decay);
-        let mut state = 0.0_f64;
-        let mut last_frame = None;
-        let stream = self.input.execute(partition, context)?.map(move |batch| {
-            let batch = batch?;
-            let audio = AudioBatch::new(&batch, &schema)?;
-
-            let mut filtered = Vec::with_capacity(batch.num_rows());
-            for row in 0..batch.num_rows() {
-                let (frame, sample) = audio.row(row, last_frame)?;
-                let elapsed = match last_frame {
-                    Some(last) => frame - last,
-                    None => 1,
-                };
-                let retained = if elapsed == 1 {
-                    decay
-                } else {
-                    decay.powf(elapsed as f64)
-                };
-                state = retained * state + alpha * f64::from(sample);
-                filtered.push(state as f32);
-                last_frame = Some(frame);
-            }
-
-            RecordBatch::try_new(
-                Arc::clone(&schema),
-                vec![
-                    Arc::clone(batch.column(0)),
-                    Arc::new(Float32Array::from(filtered)),
-                ],
-            )
-            .map_err(Into::into)
-        });
-
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            self.schema(),
-            stream,
-        )))
     }
 }
 
-impl FrameLowPassFilterExec {
-    fn execute_modulated(
-        &self,
-        partition: usize,
-        context: Arc<TaskContext>,
-        cutoff: &Arc<dyn ExecutionPlan>,
-        base_hz: f64,
-        depth_hz: f64,
-        sample_rate_hz: u32,
-    ) -> Result<SendableRecordBatchStream> {
-        let schema = self.schema();
-        let mut audio = self.input.execute(partition, Arc::clone(&context))?;
-        let modulation = cutoff.execute(partition, context)?;
-        let mut cursor = ModulationCursor::new(modulation, Arc::clone(&schema));
-        let output = async_stream::try_stream! {
-            let mut state = 0.0_f64;
-            let mut last_audio_frame = None;
-            let mut next_frame = 0_u128;
-            while let Some(batch) = audio.next().await {
-                let batch = batch?;
-                let audio_batch = AudioBatch::new(&batch, &schema)?;
-                let mut filtered = Vec::with_capacity(batch.num_rows());
-                for row in 0..batch.num_rows() {
-                    let (frame, sample) = audio_batch.row(row, last_audio_frame)?;
-                    while next_frame <= u128::from(frame) {
-                        let modulation = cursor.next_sample(next_frame).await?;
-                        let cutoff = mapped_cutoff(modulation, next_frame, base_hz, depth_hz, sample_rate_hz)?;
-                        let exponent = -2.0 * std::f64::consts::PI * cutoff / f64::from(sample_rate_hz);
-                        let alpha = -exponent.exp_m1();
-                        let decay = exponent.exp();
-                        let input = if next_frame == u128::from(frame) { f64::from(sample) } else { 0.0 };
-                        state = decay * state + alpha * input;
-                        next_frame += 1;
-                    }
-                    filtered.push(state as f32);
-                    last_audio_frame = Some(frame);
-                }
-                yield RecordBatch::try_new(Arc::clone(&schema), vec![
-                    Arc::clone(batch.column(0)), Arc::new(Float32Array::from(filtered)),
-                ])?;
-            }
-        };
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            self.schema(),
-            output,
-        )))
+struct ModulationBatch {
+    frames: UInt64Array,
+    samples: Float32Array,
+}
+
+impl ModulationBatch {
+    fn new(batch: RecordBatch, schema: &SchemaRef) -> Result<Self> {
+        if batch.schema() != *schema {
+            return Err(DataFusionError::Execution(
+                "FrameLowPassFilterExec received an incompatible modulation batch schema".into(),
+            ));
+        }
+        let frames = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| DataFusionError::Execution("expected UInt64 modulation frames".into()))?
+            .clone();
+        let samples = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .ok_or_else(|| {
+                DataFusionError::Execution("expected Float32 modulation samples".into())
+            })?
+            .clone();
+        Ok(Self { frames, samples })
     }
 }
 
@@ -452,7 +510,7 @@ impl FrameLowPassFilterExec {
 struct ModulationCursor {
     stream: SendableRecordBatchStream,
     schema: SchemaRef,
-    batch: Option<RecordBatch>,
+    batch: Option<ModulationBatch>,
     row: usize,
 }
 
@@ -470,49 +528,29 @@ impl ModulationCursor {
         while self
             .batch
             .as_ref()
-            .is_none_or(|batch| self.row == batch.num_rows())
+            .is_none_or(|batch| self.row == batch.frames.len())
         {
             let Some(batch) = self.stream.next().await.transpose()? else {
                 return Err(DataFusionError::Execution(format!(
                     "FrameLowPassFilterExec modulation expected frame {expected}, got end of stream"
                 )));
             };
-            if batch.schema() != self.schema {
-                return Err(DataFusionError::Execution(
-                    "FrameLowPassFilterExec received an incompatible modulation batch schema"
-                        .into(),
-                ));
-            }
-            self.batch = Some(batch);
+            self.batch = Some(ModulationBatch::new(batch, &self.schema)?);
             self.row = 0;
         }
         let batch = self.batch.as_ref().unwrap();
-        let frames = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| {
-                DataFusionError::Execution("expected UInt64 modulation frames".into())
-            })?;
-        let samples = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<Float32Array>()
-            .ok_or_else(|| {
-                DataFusionError::Execution("expected Float32 modulation samples".into())
-            })?;
-        if frames.is_null(self.row) || samples.is_null(self.row) {
+        if batch.frames.is_null(self.row) || batch.samples.is_null(self.row) {
             return Err(DataFusionError::Execution(format!(
                 "FrameLowPassFilterExec modulation expected frame {expected}, got null frame or sample"
             )));
         }
-        let observed = frames.value(self.row);
+        let observed = batch.frames.value(self.row);
         if u128::from(observed) != expected {
             return Err(DataFusionError::Execution(format!(
                 "FrameLowPassFilterExec modulation expected frame {expected}, got {observed}"
             )));
         }
-        let sample = samples.value(self.row);
+        let sample = batch.samples.value(self.row);
         super::validate_sample(sample, observed, "FrameLowPassFilterExec modulation")?;
         self.row += 1;
         Ok(sample)
@@ -548,7 +586,14 @@ mod tests {
     use std::sync::Arc;
 
     use super::default_cutoff_mapping;
-
+    use crate::{
+        RenderConfig,
+        layout::frame::frame_schema,
+        physical::frame::{
+            Cutoff, FrameGainExec, FrameLowPassFilterExec, FrameMixExec, FramePlan,
+            FrameSineOscExec, FrameSquareOscExec, low_pass,
+        },
+    };
     use datafusion::{
         arrow::array::{Float32Array, RecordBatch, UInt64Array},
         common::config::ConfigOptions,
@@ -565,34 +610,12 @@ mod tests {
         },
     };
 
-    use crate::{
-        RenderConfig,
-        layout::frame::frame_schema,
-        physical::frame::{
-            Cutoff, FrameGainExec, FrameLowPassFilterExec, FrameMixExec, FramePlan,
-            FrameSineOscExec, FrameSquareOscExec, low_pass,
-        },
-    };
-
     fn config() -> RenderConfig {
         RenderConfig::builder()
             .sample_rate_hz(8)
             .frame_count(8)
             .build()
             .unwrap()
-    }
-
-    #[test]
-    fn default_cutoff_mapping_preserves_preview_range_and_fits_low_rates() {
-        assert_eq!(
-            default_cutoff_mapping(&RenderConfig::default()),
-            (1000.0, 900.0)
-        );
-        let low_rate = config();
-        let (base, depth) = default_cutoff_mapping(&low_rate);
-        assert_eq!((base, depth), (2.0, 1.8));
-        assert!(base - depth > 0.0);
-        assert!(base + depth < f64::from(low_rate.sample_rate_hz()) / 2.0);
     }
 
     fn batch(config: &RenderConfig, frames: Vec<u64>, samples: Vec<f32>) -> RecordBatch {
@@ -627,6 +650,179 @@ mod tests {
                 (0..batch.num_rows()).map(|row| (frames.value(row), samples.value(row)))
             })
             .collect()
+    }
+
+    #[test]
+    fn rejects_invalid_cutoffs_and_input_schema() {
+        let config = config();
+        let source = input(&config, vec![vec![]]);
+        for cutoff in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 4.0] {
+            assert!(matches!(
+                FrameLowPassFilterExec::try_new(&config, Arc::clone(&source), cutoff),
+                Err(DataFusionError::Plan(message)) if message.contains("cutoff_hz")
+            ));
+        }
+        let other = RenderConfig::builder()
+            .sample_rate_hz(16)
+            .frame_count(8)
+            .build()
+            .unwrap();
+        assert!(matches!(
+            FrameLowPassFilterExec::try_new(&config, input(&other, vec![vec![]]), 1.0),
+            Err(DataFusionError::Plan(message)) if message.contains("expected input schema")
+        ));
+    }
+
+    #[tokio::test]
+    async fn impulse_decays_across_batches_and_missing_frames() -> Result<()> {
+        let config = config();
+        let source = input(
+            &config,
+            vec![vec![
+                batch(&config, vec![0, 1], vec![1.0, 0.0]),
+                batch(&config, vec![2, 4], vec![0.0, 0.0]),
+            ]],
+        );
+        let cutoff = 8.0 * 2.0_f64.ln() / (2.0 * std::f64::consts::PI);
+        let plan: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameLowPassFilterExec::try_new(&config, source, cutoff)?);
+        assert_eq!(plan.boundedness(), Boundedness::Bounded);
+        assert_eq!(plan.schema(), frame_schema(&config));
+        assert!(
+            displayable(plan.as_ref())
+                .indent(false)
+                .to_string()
+                .contains("FrameLowPassFilterExec")
+        );
+
+        for _ in 0..2 {
+            let batches = collect(Arc::clone(&plan), Arc::new(TaskContext::default())).await?;
+            assert_eq!(
+                batches
+                    .iter()
+                    .map(RecordBatch::num_rows)
+                    .collect::<Vec<_>>(),
+                vec![2, 2]
+            );
+            let actual = rows(&batches);
+            for ((frame, sample), (expected_frame, expected_sample)) in
+                actual
+                    .into_iter()
+                    .zip([(0, 0.5), (1, 0.25), (2, 0.125), (4, 0.03125)])
+            {
+                assert_eq!(frame, expected_frame);
+                assert!((sample - expected_sample).abs() < 1e-6);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn requires_one_input_partition_at_construction_and_execution() -> Result<()> {
+        let config = config();
+        let source = input(&config, vec![vec![]]);
+        let plan = Arc::new(FrameLowPassFilterExec::try_new(&config, source, 1.0)?);
+        assert!(matches!(
+            plan.required_input_distribution().as_slice(),
+            [Distribution::SinglePartition]
+        ));
+        assert_eq!(plan.benefits_from_input_partitioning(), vec![false]);
+        assert!(matches!(
+            plan.execute(1, Arc::new(TaskContext::default())),
+            Err(DataFusionError::Execution(message)) if message.contains("partition 0")
+        ));
+
+        let split = input(&config, vec![vec![], vec![]]);
+        assert!(matches!(
+            FrameLowPassFilterExec::try_new(&config, Arc::clone(&split), 1.0),
+            Err(DataFusionError::Plan(message)) if message.contains("one input partition")
+        ));
+        let temporarily_split = Arc::clone(&plan).with_new_children(vec![split])?;
+        assert!(matches!(
+            temporarily_split.execute(0, Arc::new(TaskContext::default())),
+            Err(DataFusionError::Execution(message)) if message.contains("one input partition")
+        ));
+        let replacement = input(&config, vec![vec![]]);
+        let rebuilt = plan.with_new_children(vec![replacement])?;
+        assert_eq!(rebuilt.output_partitioning().partition_count(), 1);
+        assert_eq!(rebuilt.boundedness(), Boundedness::Bounded);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn distribution_optimizer_keeps_filter_state_across_batches() -> Result<()> {
+        let config = config();
+        let source = input(
+            &config,
+            vec![vec![
+                batch(&config, vec![0, 1], vec![1.0, 0.0]),
+                batch(&config, vec![2, 3], vec![0.0, 0.0]),
+            ]],
+        );
+        let cutoff = 8.0 * 2.0_f64.ln() / (2.0 * std::f64::consts::PI);
+        let gain = Arc::new(FrameGainExec::try_new(&config, source, 1.0)?);
+        let plan: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameLowPassFilterExec::try_new(&config, gain, cutoff)?);
+        let mut options = ConfigOptions::new();
+        options.execution.target_partitions = 2;
+        options.execution.batch_size = 1;
+        options.optimizer.repartition_file_scans = false;
+        let distributed = EnforceDistribution::new().optimize(plan, &options)?;
+        let optimized = EnforceSorting::new().optimize(distributed, &options)?;
+        assert_eq!(optimized.output_partitioning().partition_count(), 1);
+        assert!(
+            displayable(optimized.as_ref())
+                .indent(false)
+                .to_string()
+                .contains("SortExec")
+        );
+
+        let batches = collect(optimized, Arc::new(TaskContext::default())).await?;
+        let samples = batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                    .unwrap()
+                    .values()
+                    .iter()
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(samples, [0.5, 0.25, 0.125, 0.0625]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_repeated_frames_and_non_finite_samples() -> Result<()> {
+        let config = config();
+        for (frames, samples, message) in [
+            (vec![0, 0], vec![1.0, 0.0], "must increase"),
+            (vec![0], vec![f32::NAN], "non-finite sample"),
+        ] {
+            let source = input(&config, vec![vec![batch(&config, frames, samples)]]);
+            let plan: Arc<dyn ExecutionPlan> =
+                Arc::new(FrameLowPassFilterExec::try_new(&config, source, 1.0)?);
+            let error = collect(plan, Arc::new(TaskContext::default()))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+        }
+        Ok(())
+    }
+    #[test]
+    fn default_cutoff_mapping_preserves_preview_range_and_fits_low_rates() {
+        assert_eq!(
+            default_cutoff_mapping(&RenderConfig::default()),
+            (1000.0, 900.0)
+        );
+        let low_rate = config();
+        let (base, depth) = default_cutoff_mapping(&low_rate);
+        assert_eq!((base, depth), (2.0, 1.8));
+        assert!(base - depth > 0.0);
+        assert!(base + depth < f64::from(low_rate.sample_rate_hz()) / 2.0);
     }
 
     #[tokio::test]
@@ -993,164 +1189,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn rejects_invalid_cutoffs_and_input_schema() {
-        let config = config();
-        let source = input(&config, vec![vec![]]);
-        for cutoff in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 4.0] {
-            assert!(matches!(
-                FrameLowPassFilterExec::try_new(&config, Arc::clone(&source), cutoff),
-                Err(DataFusionError::Plan(message)) if message.contains("cutoff_hz")
-            ));
-        }
-        let other = RenderConfig::builder()
-            .sample_rate_hz(16)
-            .frame_count(8)
-            .build()
-            .unwrap();
-        assert!(matches!(
-            FrameLowPassFilterExec::try_new(&config, input(&other, vec![vec![]]), 1.0),
-            Err(DataFusionError::Plan(message)) if message.contains("expected input schema")
-        ));
-    }
-
-    #[tokio::test]
-    async fn impulse_decays_across_batches_and_missing_frames() -> Result<()> {
-        let config = config();
-        let source = input(
-            &config,
-            vec![vec![
-                batch(&config, vec![0, 1], vec![1.0, 0.0]),
-                batch(&config, vec![2, 4], vec![0.0, 0.0]),
-            ]],
-        );
-        let cutoff = 8.0 * 2.0_f64.ln() / (2.0 * std::f64::consts::PI);
-        let plan: Arc<dyn ExecutionPlan> =
-            Arc::new(FrameLowPassFilterExec::try_new(&config, source, cutoff)?);
-        assert_eq!(plan.boundedness(), Boundedness::Bounded);
-        assert_eq!(plan.schema(), frame_schema(&config));
-        assert!(
-            displayable(plan.as_ref())
-                .indent(false)
-                .to_string()
-                .contains("FrameLowPassFilterExec")
-        );
-
-        for _ in 0..2 {
-            let batches = collect(Arc::clone(&plan), Arc::new(TaskContext::default())).await?;
-            assert_eq!(
-                batches
-                    .iter()
-                    .map(RecordBatch::num_rows)
-                    .collect::<Vec<_>>(),
-                vec![2, 2]
-            );
-            let actual = batches
-                .iter()
-                .flat_map(|batch| {
-                    let frames = batch
-                        .column(0)
-                        .as_any()
-                        .downcast_ref::<UInt64Array>()
-                        .unwrap();
-                    let samples = batch
-                        .column(1)
-                        .as_any()
-                        .downcast_ref::<Float32Array>()
-                        .unwrap();
-                    (0..batch.num_rows()).map(|row| (frames.value(row), samples.value(row)))
-                })
-                .collect::<Vec<_>>();
-            for ((frame, sample), (expected_frame, expected_sample)) in
-                actual
-                    .into_iter()
-                    .zip([(0, 0.5), (1, 0.25), (2, 0.125), (4, 0.03125)])
-            {
-                assert_eq!(frame, expected_frame);
-                assert!((sample - expected_sample).abs() < 1e-6);
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn requires_one_input_partition_at_construction_and_execution() -> Result<()> {
-        let config = config();
-        let source = input(&config, vec![vec![]]);
-        let plan = Arc::new(FrameLowPassFilterExec::try_new(&config, source, 1.0)?);
-        assert!(matches!(
-            plan.required_input_distribution().as_slice(),
-            [Distribution::SinglePartition]
-        ));
-        assert_eq!(plan.benefits_from_input_partitioning(), vec![false]);
-        assert!(matches!(
-            plan.execute(1, Arc::new(TaskContext::default())),
-            Err(DataFusionError::Execution(message)) if message.contains("partition 0")
-        ));
-
-        let split = input(&config, vec![vec![], vec![]]);
-        assert!(matches!(
-            FrameLowPassFilterExec::try_new(&config, Arc::clone(&split), 1.0),
-            Err(DataFusionError::Plan(message)) if message.contains("one input partition")
-        ));
-        let temporarily_split = Arc::clone(&plan).with_new_children(vec![split])?;
-        assert!(matches!(
-            temporarily_split.execute(0, Arc::new(TaskContext::default())),
-            Err(DataFusionError::Execution(message)) if message.contains("one input partition")
-        ));
-        let replacement = input(&config, vec![vec![]]);
-        let rebuilt = plan.with_new_children(vec![replacement])?;
-        assert_eq!(rebuilt.output_partitioning().partition_count(), 1);
-        assert_eq!(rebuilt.boundedness(), Boundedness::Bounded);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn distribution_optimizer_keeps_filter_state_across_batches() -> Result<()> {
-        let config = config();
-        let source = input(
-            &config,
-            vec![vec![
-                batch(&config, vec![0, 1], vec![1.0, 0.0]),
-                batch(&config, vec![2, 3], vec![0.0, 0.0]),
-            ]],
-        );
-        let cutoff = 8.0 * 2.0_f64.ln() / (2.0 * std::f64::consts::PI);
-        let gain = Arc::new(FrameGainExec::try_new(&config, source, 1.0)?);
-        let plan: Arc<dyn ExecutionPlan> =
-            Arc::new(FrameLowPassFilterExec::try_new(&config, gain, cutoff)?);
-        let mut options = ConfigOptions::new();
-        options.execution.target_partitions = 2;
-        options.execution.batch_size = 1;
-        options.optimizer.repartition_file_scans = false;
-        let distributed = EnforceDistribution::new().optimize(plan, &options)?;
-        let optimized = EnforceSorting::new().optimize(distributed, &options)?;
-        assert_eq!(optimized.output_partitioning().partition_count(), 1);
-        assert!(
-            displayable(optimized.as_ref())
-                .indent(false)
-                .to_string()
-                .contains("SortExec")
-        );
-
-        let batches = collect(optimized, Arc::new(TaskContext::default())).await?;
-        let samples = batches
-            .iter()
-            .flat_map(|batch| {
-                batch
-                    .column(1)
-                    .as_any()
-                    .downcast_ref::<Float32Array>()
-                    .unwrap()
-                    .values()
-                    .iter()
-                    .copied()
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(samples, [0.5, 0.25, 0.125, 0.0625]);
-        Ok(())
-    }
-
     #[tokio::test]
     async fn optimizer_keeps_the_unbounded_audio_graph_streaming() -> Result<()> {
         let config = config();
@@ -1192,24 +1230,6 @@ mod tests {
                     .sum::<usize>(),
                 8
             );
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rejects_repeated_frames_and_non_finite_samples() -> Result<()> {
-        let config = config();
-        for (frames, samples, message) in [
-            (vec![0, 0], vec![1.0, 0.0], "must increase"),
-            (vec![0], vec![f32::NAN], "non-finite sample"),
-        ] {
-            let source = input(&config, vec![vec![batch(&config, frames, samples)]]);
-            let plan: Arc<dyn ExecutionPlan> =
-                Arc::new(FrameLowPassFilterExec::try_new(&config, source, 1.0)?);
-            let error = collect(plan, Arc::new(TaskContext::default()))
-                .await
-                .unwrap_err();
-            assert!(error.to_string().contains(message), "{error}");
         }
         Ok(())
     }
