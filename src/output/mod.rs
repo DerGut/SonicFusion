@@ -1,7 +1,7 @@
 mod wav;
 mod waveform;
 
-pub use wav::write_wav;
+pub use wav::{StreamingWavStats, write_streaming_wav, write_wav};
 pub use waveform::write_waveform_svg;
 
 use crate::{Error::InvalidRender, RenderConfig, Result};

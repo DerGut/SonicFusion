@@ -6,8 +6,8 @@ pub mod physical;
 mod render;
 
 pub use config::{RenderConfig, RenderConfigBuilder};
-pub use output::{write_wav, write_waveform_svg};
-pub use render::decode_from_frames;
+pub use output::{StreamingWavStats, write_streaming_wav, write_wav, write_waveform_svg};
+pub use render::{FrameDecoder, decode_from_frames};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -18,6 +18,9 @@ pub enum Error {
 
     #[error("invalid render: {0}")]
     InvalidRender(String),
+
+    #[error("render stream failed: {0}")]
+    RenderStream(#[from] datafusion::error::DataFusionError),
 
     #[error("failed to {action} WAV at {path}: {source}")]
     WavError {

@@ -10,9 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use datafusion::{arrow::array::RecordBatch, execution::TaskContext};
+use datafusion::execution::TaskContext;
 use futures::TryStreamExt;
-use sonicfusion::{RenderConfig, decode_from_frames, write_wav, write_waveform_svg};
+use sonicfusion::{FrameDecoder, RenderConfig, write_streaming_wav, write_wav, write_waveform_svg};
 
 use dag::build_plan;
 
@@ -164,30 +164,6 @@ async fn run() -> Result<(), PreviewError> {
     let plan = build_plan(&config).map_err(PreviewError::Graph)?;
     show_time("Graph construction", graph_started.elapsed());
 
-    let render_started = Instant::now();
-    let mut stream = plan
-        .execute(0, Arc::new(TaskContext::default()))
-        .map_err(PreviewError::Render)?;
-    let mut batches: Vec<RecordBatch> = Vec::new();
-    let mut first_decoded = false;
-    while let Some(batch) = stream.try_next().await.map_err(PreviewError::Render)? {
-        if !first_decoded && batch.num_rows() > 0 {
-            // The shared collected decoder requires exact coverage. Validate the first
-            // batch against its own bounded prefix to measure first decoded audio.
-            let prefix = RenderConfig::builder()
-                .frame_count(batch.num_rows() as u64)
-                .build()
-                .map_err(|error| PreviewError::Arguments(error.to_string()))?;
-            decode_from_frames(std::slice::from_ref(&batch), &prefix)
-                .map_err(PreviewError::Decode)?;
-            show_time("First decoded batch", started.elapsed());
-            first_decoded = true;
-        }
-        batches.push(batch);
-    }
-    let samples = decode_from_frames(&batches, &config).map_err(PreviewError::Decode)?;
-    show_time("Render and validation", render_started.elapsed());
-
     let file_started = Instant::now();
     std::fs::create_dir_all(&options.output_dir)
         .map_err(|error| file_error(&options.output_dir, error))?;
@@ -200,20 +176,49 @@ async fn run() -> Result<(), PreviewError> {
         .suffix(".wav")
         .tempfile_in(&output_dir)
         .map_err(|error| file_error(&output_dir, error))?;
-    write_wav(temporary.path(), &samples, &config)
-        .map_err(|error| file_error(temporary.path(), error))?;
     let temporary_path = temporary.path().to_path_buf();
-    let (_, wav_path) = temporary
-        .keep()
-        .map_err(|error| file_error(&temporary_path, error))?;
-    println!("WAV: {}", wav_path.display());
+    // Reserve a unique preview name, then let either recording path publish it.
+    drop(temporary);
+    let wav_path = temporary_path;
+    show_time("Output preparation", file_started.elapsed());
+    let render_started = Instant::now();
+    let mut stream = plan
+        .execute(0, Arc::new(TaskContext::default()))
+        .map_err(PreviewError::Render)?;
     if options.waveform {
+        let mut decoder = FrameDecoder::new(&config);
+        let mut samples = Vec::new();
+        let mut first_decoded = false;
+        while let Some(batch) = stream.try_next().await.map_err(PreviewError::Render)? {
+            let chunk = decoder.decode_batch(&batch).map_err(PreviewError::Decode)?;
+            if !first_decoded && !chunk.is_empty() {
+                show_time("First decoded batch", started.elapsed());
+                first_decoded = true;
+            }
+            samples.extend_from_slice(chunk);
+        }
+        decoder.finish().map_err(PreviewError::Decode)?;
+        write_wav(&wav_path, &samples, &config).map_err(|error| file_error(&wav_path, error))?;
         let waveform_path = wav_path.with_extension("svg");
         write_waveform_svg(&waveform_path, &samples, &config)
             .map_err(|error| file_error(&waveform_path, error))?;
         println!("Waveform: {}", waveform_path.display());
+    } else {
+        let output_started_at = started.elapsed();
+        let stats = write_streaming_wav(&wav_path, stream, &config)
+            .await
+            .map_err(|error| match error {
+                sonicfusion::Error::RenderStream(source) => PreviewError::Render(source),
+                error @ sonicfusion::Error::InvalidRender(_) => PreviewError::Decode(error),
+                error => file_error(&wav_path, error),
+            })?;
+        show_time(
+            "First decoded batch",
+            output_started_at + stats.first_decoded_batch,
+        );
     }
-    show_time("Output preparation", file_started.elapsed());
+    show_time("Render and output", render_started.elapsed());
+    println!("WAV: {}", wav_path.display());
 
     let launch_started = Instant::now();
     let mut child = Command::new(&options.player)

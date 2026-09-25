@@ -6,46 +6,48 @@ use datafusion::arrow::{
 use crate::{Error::InvalidRender, RenderConfig, Result, layout::frame::frame_schema};
 
 pub fn decode_from_frames(batches: &[RecordBatch], config: &RenderConfig) -> Result<Vec<f32>> {
-    BufferedFrameDecoder::try_new(config)?.decode(batches)
+    if batches.is_empty() {
+        return Err(InvalidRender(
+            "frame render contained no RecordBatches; first missing frame is 0".to_string(),
+        ));
+    }
+    let capacity = usize::try_from(config.frame_count()).map_err(|error| {
+        InvalidRender(format!(
+            "configured frame count {} does not fit this platform's usize frame index (maximum {}): {error}",
+            config.frame_count(),
+            usize::MAX,
+        ))
+    })?;
+
+    let mut decoder = FrameDecoder::new(config);
+    let mut samples = Vec::with_capacity(capacity);
+    for batch in batches {
+        samples.extend_from_slice(decoder.decode_batch(batch)?);
+    }
+    decoder.finish()?;
+    Ok(samples)
 }
 
-struct BufferedFrameDecoder {
+/// Validates successive frame batches and borrows their ordered samples.
+/// Call `finish` after the upstream stream ends to check exact finite coverage.
+pub struct FrameDecoder {
     configured_frame_count: u64,
     expected_schema: SchemaRef,
-
     next_expected_frame: u64,
-    sample_buffer: Vec<f32>,
+    batch_index: usize,
 }
 
-impl BufferedFrameDecoder {
-    fn try_new(config: &RenderConfig) -> Result<Self> {
-        let buffer_capacity = usize::try_from(config.frame_count()).map_err(|error| {
-            InvalidRender(format!(
-                "configured frame count {} does not fit this platform's usize frame index (maximum {}): {error}",
-                config.frame_count(),
-                usize::MAX,
-            ))
-        })?;
-
-        Ok(BufferedFrameDecoder {
+impl FrameDecoder {
+    pub fn new(config: &RenderConfig) -> Self {
+        Self {
             configured_frame_count: config.frame_count(),
             expected_schema: frame_schema(config),
             next_expected_frame: 0,
-            sample_buffer: Vec::with_capacity(buffer_capacity),
-        })
+            batch_index: 0,
+        }
     }
 
-    fn decode(mut self, batches: &[RecordBatch]) -> Result<Vec<f32>> {
-        if batches.is_empty() {
-            return Err(InvalidRender(
-                "frame render contained no RecordBatches; first missing frame is 0".to_string(),
-            ));
-        }
-
-        for (batch_index, batch) in batches.iter().enumerate() {
-            self.decode_batch(batch_index, batch)?;
-        }
-
+    pub fn finish(self) -> Result<()> {
         if self.next_expected_frame != self.configured_frame_count {
             return Err(InvalidRender(format!(
                 "frame render ended early: first missing frame is {}; expected coverage 0..{}",
@@ -53,10 +55,11 @@ impl BufferedFrameDecoder {
             )));
         }
 
-        Ok(self.sample_buffer)
+        Ok(())
     }
 
-    fn decode_batch(&mut self, batch_index: usize, batch: &RecordBatch) -> Result<()> {
+    pub fn decode_batch<'a>(&mut self, batch: &'a RecordBatch) -> Result<&'a [f32]> {
+        let batch_index = self.batch_index;
         if batch.schema() != self.expected_schema {
             return Err(InvalidRender(format!(
                 "schema mismatch in batch {batch_index}: expected {:?}, got {:?}",
@@ -85,16 +88,15 @@ impl BufferedFrameDecoder {
             })?;
 
         for row_index in 0..batch.num_rows() {
-            let sample = self.next_sample(batch_index, row_index, frames, samples)?;
-
-            self.sample_buffer.push(sample);
+            self.next_sample(batch_index, row_index, frames, samples)?;
             self.next_expected_frame =
                 self.next_expected_frame.checked_add(1).ok_or_else(|| {
                     InvalidRender("decoded frame position overflowed UInt64".to_string())
                 })?;
         }
 
-        Ok(())
+        self.batch_index += 1;
+        Ok(samples.values())
     }
 
     fn next_sample(
@@ -103,7 +105,7 @@ impl BufferedFrameDecoder {
         row_index: usize,
         frames: &PrimitiveArray<UInt64Type>,
         samples: &PrimitiveArray<Float32Type>,
-    ) -> Result<f32> {
+    ) -> Result<()> {
         if self.next_expected_frame >= self.configured_frame_count {
             return Err(InvalidRender(format!(
                 "unexpected extra frame in batch {batch_index} row {row_index}; expected coverage 0..{}",
@@ -137,7 +139,7 @@ impl BufferedFrameDecoder {
             )));
         }
 
-        Ok(sample)
+        Ok(())
     }
 }
 
