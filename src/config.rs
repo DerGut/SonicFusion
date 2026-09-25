@@ -6,6 +6,7 @@ pub struct RenderConfig {
     frame_count: u64,
     batch_frame_capacity: usize,
     frequency_hz: f64,
+    pulse_width: f64,
     gain: f32,
     max_render_seconds: u64,
 }
@@ -15,6 +16,7 @@ impl RenderConfig {
     const DEFAULT_FRAME_COUNT: u64 = 48_000;
     const DEFAULT_BATCH_FRAME_CAPACITY: usize = 1024;
     const DEFAULT_FREQUENCY_HZ: f64 = 440.0;
+    const DEFAULT_PULSE_WIDTH: f64 = 0.5;
     const DEFAULT_GAIN: f32 = 0.5;
     const DEFAULT_MAX_RENDER_SECONDS: u64 = 60;
 
@@ -36,6 +38,11 @@ impl RenderConfig {
 
     pub fn frequency_hz(&self) -> f64 {
         self.frequency_hz
+    }
+
+    /// Fraction of a square-wave period spent at +1, from 0.0 to 1.0.
+    pub fn pulse_width(&self) -> f64 {
+        self.pulse_width
     }
 
     pub fn gain(&self) -> f32 {
@@ -78,6 +85,11 @@ impl RenderConfig {
                 self.sample_rate_hz
             )));
         }
+        if !self.pulse_width.is_finite() || !(0.0..=1.0).contains(&self.pulse_width) {
+            return Err(InvalidConfig(
+                "pulse_width must be finite and between 0 and 1 inclusive".to_string(),
+            ));
+        }
         if !self.gain.is_finite() {
             return Err(InvalidConfig("gain must be finite".to_string()));
         }
@@ -119,6 +131,7 @@ pub struct RenderConfigBuilder {
     frame_count: Option<u64>,
     batch_frame_capacity: Option<usize>,
     frequency_hz: Option<f64>,
+    pulse_width: Option<f64>,
     gain: Option<f32>,
     max_render_seconds: Option<u64>,
 }
@@ -138,6 +151,9 @@ impl RenderConfigBuilder {
             frequency_hz: self
                 .frequency_hz
                 .unwrap_or(RenderConfig::DEFAULT_FREQUENCY_HZ),
+            pulse_width: self
+                .pulse_width
+                .unwrap_or(RenderConfig::DEFAULT_PULSE_WIDTH),
             gain: self.gain.unwrap_or(RenderConfig::DEFAULT_GAIN),
             max_render_seconds: self
                 .max_render_seconds
@@ -165,6 +181,12 @@ impl RenderConfigBuilder {
 
     pub fn frequency_hz(mut self, frequency_hz: f64) -> Self {
         self.frequency_hz = Some(frequency_hz);
+        self
+    }
+
+    /// Sets the fraction of each square-wave period spent at +1 (0.0..=1.0).
+    pub fn pulse_width(mut self, pulse_width: f64) -> Self {
+        self.pulse_width = Some(pulse_width);
         self
     }
 
@@ -202,6 +224,7 @@ mod tests {
         assert_eq!(config.frame_count(), 48_000);
         assert_eq!(config.batch_frame_capacity(), 1_024);
         assert_eq!(config.frequency_hz(), 440.0);
+        assert_eq!(config.pulse_width(), 0.5);
         assert_eq!(config.gain(), 0.5);
         assert_eq!(config.max_render_seconds(), 60);
     }
@@ -273,6 +296,21 @@ mod tests {
             RenderConfig::builder().gain(f32::INFINITY).build(),
             "invalid configuration: gain must be finite",
         );
+    }
+
+    #[test]
+    fn builder_validates_pulse_width() {
+        for width in [0.0, 0.25, 1.0] {
+            let config = RenderConfig::builder().pulse_width(width).build().unwrap();
+            assert_eq!(config.pulse_width(), width);
+        }
+
+        for width in [-0.01, 1.01, f64::NAN, f64::INFINITY] {
+            assert_invalid(
+                RenderConfig::builder().pulse_width(width).build(),
+                "invalid configuration: pulse_width must be finite and between 0 and 1 inclusive",
+            );
+        }
     }
 
     #[test]
