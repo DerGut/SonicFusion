@@ -24,7 +24,17 @@ pub struct FrameSquareOscExec {
 }
 
 impl FrameSquareOscExec {
-    pub fn new(config: &RenderConfig) -> Self {
+    pub fn try_new(
+        config: &RenderConfig,
+        frequency_hz: f64,
+        pulse_width: f64,
+    ) -> datafusion::error::Result<Self> {
+        super::validate_frequency(frequency_hz, config.sample_rate_hz())?;
+        if !pulse_width.is_finite() || !(0.0..=1.0).contains(&pulse_width) {
+            return Err(DataFusionError::Plan(
+                "pulse_width must be finite and between 0 and 1 inclusive".into(),
+            ));
+        }
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(frame_schema(config)),
             Partitioning::UnknownPartitioning(1),
@@ -34,13 +44,13 @@ impl FrameSquareOscExec {
             },
         ));
 
-        Self {
+        Ok(Self {
             sample_rate_hz: config.sample_rate_hz(),
-            frequency_hz: config.frequency_hz(),
-            pulse_width: config.pulse_width(),
+            frequency_hz,
+            pulse_width,
             batch_frame_capacity: config.batch_frame_capacity(),
             properties,
-        }
+        })
     }
 }
 
@@ -159,13 +169,25 @@ mod tests {
 
     use crate::{RenderConfig, physical::frame::FrameSquareOscExec};
 
+    #[test]
+    fn square_source_validates_its_own_frequency_and_pulse_width() {
+        let config = test_config();
+        for width in [0.0, 0.25, 1.0] {
+            assert!(FrameSquareOscExec::try_new(&config, 0.0, width).is_ok());
+        }
+        for width in [-0.01, 1.01, f64::NAN, f64::INFINITY] {
+            let error = FrameSquareOscExec::try_new(&config, 2.0, width).unwrap_err();
+            assert!(error.to_string().contains("pulse_width"), "{error}");
+        }
+        let error = FrameSquareOscExec::try_new(&config, 4.0, 0.5).unwrap_err();
+        assert!(error.to_string().contains("below Nyquist"), "{error}");
+    }
+
     fn test_config() -> RenderConfig {
         RenderConfig::builder()
             .sample_rate_hz(8)
             .frame_count(10)
             .batch_frame_capacity(4)
-            .frequency_hz(2.0)
-            .pulse_width(0.25)
             .build()
             .unwrap()
     }
@@ -173,7 +195,8 @@ mod tests {
     #[tokio::test]
     async fn limited_square_source_emits_expected_frames_and_samples() {
         let config = test_config();
-        let source: Arc<dyn ExecutionPlan> = Arc::new(FrameSquareOscExec::new(&config));
+        let source: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameSquareOscExec::try_new(&config, 2.0, 0.25).unwrap());
         let limit = GlobalLimitExec::new(source, 0, Some(config.frame_count() as usize));
         assert_matches!(limit.properties().boundedness, Boundedness::Bounded);
 
@@ -224,7 +247,7 @@ mod tests {
 
     #[tokio::test]
     async fn square_source_streams_full_batches_and_restarts_per_execution() {
-        let exec = FrameSquareOscExec::new(&test_config());
+        let exec = FrameSquareOscExec::try_new(&test_config(), 2.0, 0.25).unwrap();
         let context = Arc::new(TaskContext::default());
         let batches = exec
             .execute(0, Arc::clone(&context))
@@ -263,7 +286,7 @@ mod tests {
 
     #[test]
     fn square_source_exposes_leaf_plan_contract() {
-        let exec = Arc::new(FrameSquareOscExec::new(&test_config()));
+        let exec = Arc::new(FrameSquareOscExec::try_new(&test_config(), 2.0, 0.25).unwrap());
         assert_eq!(exec.name(), "FrameSquareOscExec");
         assert!(exec.children().is_empty());
         assert!(Arc::clone(&exec).with_new_children(vec![]).is_ok());
@@ -302,7 +325,7 @@ mod tests {
 
     #[test]
     fn square_source_rejects_nonzero_partition() {
-        let exec = FrameSquareOscExec::new(&test_config());
+        let exec = FrameSquareOscExec::try_new(&test_config(), 2.0, 0.25).unwrap();
         let error = exec
             .execute(1, Arc::new(TaskContext::default()))
             .err()

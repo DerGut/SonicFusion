@@ -25,7 +25,14 @@ pub struct FrameGainExec {
 }
 
 impl FrameGainExec {
-    pub fn try_new(input: Arc<dyn ExecutionPlan>, config: &RenderConfig) -> Result<Self> {
+    pub fn try_new(
+        config: &RenderConfig,
+        input: Arc<dyn ExecutionPlan>,
+        gain: f32,
+    ) -> Result<Self> {
+        if !gain.is_finite() {
+            return Err(DataFusionError::Plan("gain must be finite".into()));
+        }
         let schema = frame_schema(config);
 
         if input.schema() != schema {
@@ -35,7 +42,7 @@ impl FrameGainExec {
             )));
         }
 
-        Ok(Self::new(input, config.gain()))
+        Ok(Self::new(input, gain))
     }
 
     fn new(input: Arc<dyn ExecutionPlan>, gain: f32) -> Self {
@@ -164,9 +171,20 @@ mod tests {
         physical::frame::{FrameGainExec, FrameSineOscExec},
     };
 
+    #[test]
+    fn gain_node_rejects_non_finite_gain() {
+        let config = test_config();
+        let source: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameSineOscExec::try_new(&config, 2.0).unwrap());
+        for gain in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let error = FrameGainExec::try_new(&config, Arc::clone(&source), gain).unwrap_err();
+            assert!(error.to_string().contains("gain must be finite"), "{error}");
+        }
+    }
+
     #[tokio::test]
     async fn test_gain() {
-        let plan = test_sine_gain_limit_plan(&test_config());
+        let plan = test_sine_gain_limit_plan(&test_config(), 0.5);
 
         let batches = collect(Arc::clone(&plan), Arc::new(TaskContext::default()))
             .await
@@ -223,8 +241,8 @@ mod tests {
     #[tokio::test]
     async fn test_gain_handles_zero_negative_small_and_large_factors() {
         for gain in [0.0, -0.5, 1e-4, 1e4] {
-            let config = test_config_with_gain(gain);
-            let plan = test_sine_gain_limit_plan(&config);
+            let config = test_config();
+            let plan = test_sine_gain_limit_plan(&config, gain);
             let batches = collect(plan, Arc::new(TaskContext::default()))
                 .await
                 .expect("bounded gain render should collect successfully");
@@ -251,13 +269,13 @@ mod tests {
 
     #[test]
     fn test_gain_schema() {
-        let plan = test_sine_gain_plan(&RenderConfig::default());
+        let plan = test_sine_gain_plan(&RenderConfig::default(), 0.5);
         assert_eq!(plan.schema(), frame_schema(&RenderConfig::default()));
     }
 
     #[test]
     fn test_gain_boundedness() {
-        let plan = test_sine_gain_plan(&RenderConfig::default());
+        let plan = test_sine_gain_plan(&RenderConfig::default(), 0.5);
         assert_eq!(
             plan.boundedness(),
             Boundedness::Unbounded {
@@ -273,13 +291,12 @@ mod tests {
             .sample_rate_hz(16)
             .frame_count(source_config.frame_count())
             .batch_frame_capacity(source_config.batch_frame_capacity())
-            .frequency_hz(source_config.frequency_hz())
-            .gain(source_config.gain())
             .build()
             .expect("expected-schema configuration should be valid");
-        let source: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::new(&source_config));
+        let source: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameSineOscExec::try_new(&source_config, 2.0).unwrap());
 
-        let error = FrameGainExec::try_new(source, &expected_config)
+        let error = FrameGainExec::try_new(&expected_config, source, 0.5)
             .expect_err("mismatched sample-rate metadata should be rejected");
 
         match error {
@@ -294,13 +311,14 @@ mod tests {
     #[test]
     fn test_gain_preserves_bounded_child_properties() {
         let config = test_config();
-        let sine: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::new(&config));
+        let sine: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameSineOscExec::try_new(&config, 2.0).unwrap());
         let limit = usize::try_from(config.frame_count())
             .expect("test frame count should fit DataFusion's usize row limit");
         let bounded_input: Arc<dyn ExecutionPlan> =
             Arc::new(GlobalLimitExec::new(sine, 0, Some(limit)));
 
-        let gain = FrameGainExec::try_new(bounded_input, &config)
+        let gain = FrameGainExec::try_new(&config, bounded_input, 0.5)
             .expect("bounded frame input should be accepted");
 
         assert_eq!(gain.properties().boundedness, Boundedness::Bounded);
@@ -309,8 +327,9 @@ mod tests {
     #[test]
     fn test_gain_with_children_recomputes_properties() {
         let config = test_config();
-        let plan = test_sine_gain_plan(&config);
-        let sine: Arc<dyn ExecutionPlan> = Arc::new(FrameSineOscExec::new(&config));
+        let plan = test_sine_gain_plan(&config, 0.5);
+        let sine: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameSineOscExec::try_new(&config, 2.0).unwrap());
         let limit = usize::try_from(config.frame_count())
             .expect("test frame count should fit DataFusion's usize row limit");
         let bounded_replacement: Arc<dyn ExecutionPlan> =
@@ -326,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn test_repeated_gain_executions_are_independent() {
         let config = test_config();
-        let plan = test_sine_gain_limit_plan(&config);
+        let plan = test_sine_gain_limit_plan(&config, 0.5);
         let context = Arc::new(TaskContext::default());
 
         let first_batches = collect(Arc::clone(&plan), Arc::clone(&context))
@@ -360,31 +379,25 @@ mod tests {
     }
 
     fn test_config() -> RenderConfig {
-        test_config_with_gain(0.5)
-    }
-
-    fn test_config_with_gain(gain: f32) -> RenderConfig {
         RenderConfig::builder()
             .sample_rate_hz(8)
             .frame_count(10)
             .batch_frame_capacity(4)
-            .frequency_hz(2.0)
-            .gain(gain)
             .build()
-            .expect("test configuration should be valid")
+            .unwrap()
     }
 
-    fn test_sine_gain_plan(config: &RenderConfig) -> Arc<dyn ExecutionPlan> {
-        let sine_osc = FrameSineOscExec::new(config);
+    fn test_sine_gain_plan(config: &RenderConfig, gain: f32) -> Arc<dyn ExecutionPlan> {
+        let sine_osc = FrameSineOscExec::try_new(config, 2.0).unwrap();
 
-        let gain = FrameGainExec::try_new(Arc::new(sine_osc), config)
+        let gain = FrameGainExec::try_new(config, Arc::new(sine_osc), gain)
             .expect("expected successful construction of new FrameGainExec");
 
         Arc::new(gain)
     }
 
-    fn test_sine_gain_limit_plan(config: &RenderConfig) -> Arc<dyn ExecutionPlan> {
-        let gain = test_sine_gain_plan(config);
+    fn test_sine_gain_limit_plan(config: &RenderConfig, gain: f32) -> Arc<dyn ExecutionPlan> {
+        let gain = test_sine_gain_plan(config, gain);
 
         let limit = usize::try_from(config.frame_count())
             .expect("test frame count should fit DataFusion's usize row limit");

@@ -5,9 +5,6 @@ pub struct RenderConfig {
     sample_rate_hz: u32,
     frame_count: u64,
     batch_frame_capacity: usize,
-    frequency_hz: f64,
-    pulse_width: f64,
-    gain: f32,
     max_render_seconds: u64,
 }
 
@@ -15,9 +12,6 @@ impl RenderConfig {
     const DEFAULT_SAMPLE_RATE_HZ: u32 = 48_000;
     const DEFAULT_FRAME_COUNT: u64 = 48_000;
     const DEFAULT_BATCH_FRAME_CAPACITY: usize = 1024;
-    const DEFAULT_FREQUENCY_HZ: f64 = 440.0;
-    const DEFAULT_PULSE_WIDTH: f64 = 0.5;
-    const DEFAULT_GAIN: f32 = 0.5;
     const DEFAULT_MAX_RENDER_SECONDS: u64 = 60;
 
     pub fn builder() -> RenderConfigBuilder {
@@ -34,19 +28,6 @@ impl RenderConfig {
 
     pub fn batch_frame_capacity(&self) -> usize {
         self.batch_frame_capacity
-    }
-
-    pub fn frequency_hz(&self) -> f64 {
-        self.frequency_hz
-    }
-
-    /// Fraction of a square-wave period spent at +1, from 0.0 to 1.0.
-    pub fn pulse_width(&self) -> f64 {
-        self.pulse_width
-    }
-
-    pub fn gain(&self) -> f32 {
-        self.gain
     }
 
     pub fn max_render_seconds(&self) -> u64 {
@@ -68,30 +49,6 @@ impl RenderConfig {
             return Err(InvalidConfig(
                 "batch_frame_capacity must be greater than 0".to_string(),
             ));
-        }
-        if !self.frequency_hz.is_finite() {
-            return Err(InvalidConfig("frequency_hz must be finite".to_string()));
-        }
-        if self.frequency_hz < 0.0 {
-            return Err(InvalidConfig(
-                "frequency_hz must be greater than or equal to 0".to_string(),
-            ));
-        }
-
-        let nyquist_hz = f64::from(self.sample_rate_hz) / 2.0;
-        if self.frequency_hz >= nyquist_hz {
-            return Err(InvalidConfig(format!(
-                "frequency_hz must be below Nyquist ({nyquist_hz} Hz for sample_rate_hz {})",
-                self.sample_rate_hz
-            )));
-        }
-        if !self.pulse_width.is_finite() || !(0.0..=1.0).contains(&self.pulse_width) {
-            return Err(InvalidConfig(
-                "pulse_width must be finite and between 0 and 1 inclusive".to_string(),
-            ));
-        }
-        if !self.gain.is_finite() {
-            return Err(InvalidConfig("gain must be finite".to_string()));
         }
         if self.max_render_seconds == 0 {
             return Err(InvalidConfig(
@@ -130,9 +87,6 @@ pub struct RenderConfigBuilder {
     sample_rate_hz: Option<u32>,
     frame_count: Option<u64>,
     batch_frame_capacity: Option<usize>,
-    frequency_hz: Option<f64>,
-    pulse_width: Option<f64>,
-    gain: Option<f32>,
     max_render_seconds: Option<u64>,
 }
 
@@ -148,13 +102,6 @@ impl RenderConfigBuilder {
             batch_frame_capacity: self
                 .batch_frame_capacity
                 .unwrap_or(RenderConfig::DEFAULT_BATCH_FRAME_CAPACITY),
-            frequency_hz: self
-                .frequency_hz
-                .unwrap_or(RenderConfig::DEFAULT_FREQUENCY_HZ),
-            pulse_width: self
-                .pulse_width
-                .unwrap_or(RenderConfig::DEFAULT_PULSE_WIDTH),
-            gain: self.gain.unwrap_or(RenderConfig::DEFAULT_GAIN),
             max_render_seconds: self
                 .max_render_seconds
                 .unwrap_or(RenderConfig::DEFAULT_MAX_RENDER_SECONDS),
@@ -176,22 +123,6 @@ impl RenderConfigBuilder {
 
     pub fn batch_frame_capacity(mut self, batch_frame_capacity: usize) -> Self {
         self.batch_frame_capacity = Some(batch_frame_capacity);
-        self
-    }
-
-    pub fn frequency_hz(mut self, frequency_hz: f64) -> Self {
-        self.frequency_hz = Some(frequency_hz);
-        self
-    }
-
-    /// Sets the fraction of each square-wave period spent at +1 (0.0..=1.0).
-    pub fn pulse_width(mut self, pulse_width: f64) -> Self {
-        self.pulse_width = Some(pulse_width);
-        self
-    }
-
-    pub fn gain(mut self, gain: f32) -> Self {
-        self.gain = Some(gain);
         self
     }
 
@@ -223,9 +154,6 @@ mod tests {
         assert_eq!(config.sample_rate_hz(), 48_000);
         assert_eq!(config.frame_count(), 48_000);
         assert_eq!(config.batch_frame_capacity(), 1_024);
-        assert_eq!(config.frequency_hz(), 440.0);
-        assert_eq!(config.pulse_width(), 0.5);
-        assert_eq!(config.gain(), 0.5);
         assert_eq!(config.max_render_seconds(), 60);
     }
 
@@ -247,70 +175,6 @@ mod tests {
             RenderConfig::builder().max_render_seconds(0).build(),
             "invalid configuration: max_render_seconds must be greater than 0",
         );
-    }
-
-    #[test]
-    fn builder_accepts_dc_and_rejects_invalid_frequencies() {
-        let dc = RenderConfig::builder()
-            .frequency_hz(0.0)
-            .build()
-            .expect("zero frequency is a valid DC signal");
-        assert_eq!(dc.frequency_hz(), 0.0);
-
-        assert_invalid(
-            RenderConfig::builder().frequency_hz(-1.0).build(),
-            "invalid configuration: frequency_hz must be greater than or equal to 0",
-        );
-        assert_invalid(
-            RenderConfig::builder().frequency_hz(f64::NAN).build(),
-            "invalid configuration: frequency_hz must be finite",
-        );
-        assert_invalid(
-            RenderConfig::builder().frequency_hz(f64::INFINITY).build(),
-            "invalid configuration: frequency_hz must be finite",
-        );
-        assert_invalid(
-            RenderConfig::builder()
-                .sample_rate_hz(8_000)
-                .frequency_hz(4_000.0)
-                .build(),
-            "invalid configuration: frequency_hz must be below Nyquist (4000 Hz for sample_rate_hz 8000)",
-        );
-    }
-
-    #[test]
-    fn builder_accepts_general_finite_gain_and_rejects_non_finite_gain() {
-        for gain in [0.0, -0.5, 2.0] {
-            let config = RenderConfig::builder()
-                .gain(gain)
-                .build()
-                .expect("finite gain should be valid");
-            assert_eq!(config.gain(), gain);
-        }
-
-        assert_invalid(
-            RenderConfig::builder().gain(f32::NAN).build(),
-            "invalid configuration: gain must be finite",
-        );
-        assert_invalid(
-            RenderConfig::builder().gain(f32::INFINITY).build(),
-            "invalid configuration: gain must be finite",
-        );
-    }
-
-    #[test]
-    fn builder_validates_pulse_width() {
-        for width in [0.0, 0.25, 1.0] {
-            let config = RenderConfig::builder().pulse_width(width).build().unwrap();
-            assert_eq!(config.pulse_width(), width);
-        }
-
-        for width in [-0.01, 1.01, f64::NAN, f64::INFINITY] {
-            assert_invalid(
-                RenderConfig::builder().pulse_width(width).build(),
-                "invalid configuration: pulse_width must be finite and between 0 and 1 inclusive",
-            );
-        }
     }
 
     #[test]

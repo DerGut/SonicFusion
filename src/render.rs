@@ -365,14 +365,13 @@ mod tests {
             .sample_rate_hz(8)
             .frame_count(frame_count)
             .batch_frame_capacity(4)
-            .frequency_hz(2.0)
             .build()
             .expect("test configuration should be valid")
     }
 
     fn test_sine_gain_limit_plan(config: &RenderConfig) -> Arc<dyn ExecutionPlan> {
-        let sine_osc = FrameSineOscExec::new(config);
-        let gain = FrameGainExec::try_new(Arc::new(sine_osc), config)
+        let sine_osc = FrameSineOscExec::try_new(config, 2.0).unwrap();
+        let gain = FrameGainExec::try_new(config, Arc::new(sine_osc), 0.5)
             .expect("frame gain should accept the sine schema");
         let limit = usize::try_from(config.frame_count())
             .expect("test frame count should fit DataFusion's usize row limit");

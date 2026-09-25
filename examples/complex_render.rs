@@ -14,14 +14,14 @@ use sonicfusion::{
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = RenderConfig::default();
 
-    // Build the execution plan: sine -> gain -> finite row limit.
-    let sine_osc = Arc::new(FrameSineOscExec::new(&config));
-    let square_osc = Arc::new(FrameSquareOscExec::new(&config));
+    // Build two independently tuned sources, mix them, then apply master gain.
+    let sine_osc = Arc::new(FrameSineOscExec::try_new(&config, 440.0)?);
+    let square_osc = Arc::new(FrameSquareOscExec::try_new(&config, 220.0, 0.5)?);
 
     let mix = Arc::new(
-        FrameMixExec::try_new(vec![sine_osc, square_osc], vec![0.4, 0.6], &config).unwrap(),
+        FrameMixExec::try_new(&config, vec![sine_osc, square_osc], vec![0.4, 0.6]).unwrap(),
     );
-    let master_gain = Arc::new(FrameGainExec::try_new(mix, &config)?);
+    let master_gain = Arc::new(FrameGainExec::try_new(&config, mix, 0.5)?);
 
     let limit = usize::try_from(config.frame_count())?;
     let plan = Arc::new(GlobalLimitExec::new(master_gain, 0, Some(limit)));
