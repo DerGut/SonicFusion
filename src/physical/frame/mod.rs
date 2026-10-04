@@ -2,6 +2,7 @@ mod gain;
 mod low_pass_filter;
 mod mix;
 mod plan;
+mod sawtooth;
 mod sine;
 mod square;
 
@@ -9,6 +10,7 @@ pub use gain::FrameGainExec;
 pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass};
 pub use mix::FrameMixExec;
 pub use plan::FramePlan;
+pub use sawtooth::FrameSawToothOscExec;
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
 

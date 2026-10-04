@@ -1,3 +1,5 @@
+mod sawtooth;
+pub(crate) use sawtooth::sawtooth_at_frame;
 mod sine;
 pub(crate) use sine::sine_at_frame;
 mod square;
