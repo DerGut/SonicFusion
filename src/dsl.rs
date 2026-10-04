@@ -9,8 +9,8 @@ use datafusion::physical_plan::{ExecutionPlan, limit::GlobalLimitExec};
 use crate::{
     RenderConfig,
     physical::frame::{
-        Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSineOscExec, FrameSquareOscExec,
-        low_pass,
+        Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
+        FrameSquareOscExec, low_pass,
     },
 };
 
@@ -156,13 +156,16 @@ fn construct(
 ) -> Result<Plan, DslError> {
     let bad = |message| error(source, at, message);
     match name {
-        "sine" | "square" => {
+        "sine" | "square" | "sawtooth" => {
             if incoming.is_some() {
                 return Err(bad(format!("{name} is a source and takes no input")));
             }
-            let numbers = numeric_args(source, at, name, args, if name == "sine" { 1 } else { 2 })?;
+            let numbers =
+                numeric_args(source, at, name, args, if name == "square" { 2 } else { 1 })?;
             if name == "sine" {
                 Ok(Arc::new(FrameSineOscExec::try_new(config, numbers[0])?))
+            } else if name == "sawtooth" {
+                Ok(Arc::new(FrameSawToothOscExec::try_new(config, numbers[0])?))
             } else {
                 Ok(Arc::new(FrameSquareOscExec::try_new(
                     config, numbers[0], numbers[1],
@@ -586,6 +589,24 @@ mod tests {
     use super::build_plan;
 
     #[tokio::test]
+    async fn sawtooth_source_renders_through_the_graph_language() {
+        let config = RenderConfig::builder()
+            .sample_rate_hz(8)
+            .frame_count(8)
+            .batch_frame_capacity(3)
+            .build()
+            .unwrap();
+        let plan = build_plan("sawtooth(2) -> gain(0.5) -> out", &config).unwrap();
+        let batches = collect(plan, Arc::new(TaskContext::default()))
+            .await
+            .unwrap();
+        assert_eq!(
+            decode_from_frames(&batches, &config).unwrap(),
+            [-0.5, -0.25, 0.0, 0.25, -0.5, -0.25, 0.0, 0.25]
+        );
+    }
+
+    #[tokio::test]
     async fn weighted_branches_match_the_rust_plan() {
         let config = RenderConfig::builder()
             .sample_rate_hz(8)
@@ -674,6 +695,15 @@ mod tests {
     fn rejects_invalid_graphs_with_locations() {
         let config = RenderConfig::default();
         for (graph, message) in [
+            ("sawtooth() -> out", "sawtooth expects 1 numeric argument"),
+            (
+                "sawtooth(440, 0.5) -> out",
+                "sawtooth expects 1 numeric argument",
+            ),
+            (
+                "sine(440) -> sawtooth(220) -> out",
+                "sawtooth is a source and takes no input",
+            ),
             (
                 "sine(440) -> $A;\nmix($A, $B) -> out",
                 "line 2, column 1: undefined reference $B",
