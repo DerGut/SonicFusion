@@ -5,6 +5,7 @@ mod layout;
 mod output;
 pub mod physical;
 mod render;
+pub mod runtime;
 
 pub use config::{ExecutionConfig, RenderConfig, RenderConfigBuilder};
 pub use layout::frame::frame_schema;
