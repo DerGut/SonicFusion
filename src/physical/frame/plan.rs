@@ -5,7 +5,7 @@ use datafusion::{
     physical_plan::ExecutionPlan,
 };
 
-use crate::{RenderConfig, frame_schema};
+use crate::{ExecutionConfig, frame_schema};
 
 /// A validated frame signal. Samples have no unit and must be in [-1, 1].
 /// Ordering, density, and sample values are checked by consuming nodes at execution.
@@ -13,7 +13,10 @@ use crate::{RenderConfig, frame_schema};
 pub struct FramePlan(Arc<dyn ExecutionPlan>);
 
 impl FramePlan {
-    pub fn try_from_plan(config: &RenderConfig, plan: Arc<dyn ExecutionPlan>) -> Result<Self> {
+    pub fn try_from_plan(
+        config: &impl AsRef<ExecutionConfig>,
+        plan: Arc<dyn ExecutionPlan>,
+    ) -> Result<Self> {
         let schema = frame_schema(config);
         if plan.schema() != schema {
             return Err(DataFusionError::Plan(format!(

@@ -11,7 +11,7 @@ use datafusion::{
     },
 };
 
-use crate::{RenderConfig, dsp, layout::frame::frame_schema};
+use crate::{ExecutionConfig, dsp, layout::frame::frame_schema};
 
 /// Generates an unbounded frame stream of bipolar square-wave samples.
 #[derive(Debug)]
@@ -20,15 +20,17 @@ pub struct FrameSquareOscExec {
     frequency_hz: f64,
     pulse_width: f64,
     batch_frame_capacity: usize,
+    start_frame: u64,
     properties: Arc<PlanProperties>,
 }
 
 impl FrameSquareOscExec {
     pub fn try_new(
-        config: &RenderConfig,
+        config: &impl AsRef<ExecutionConfig>,
         frequency_hz: f64,
         pulse_width: f64,
     ) -> datafusion::error::Result<Self> {
+        let config = config.as_ref();
         super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
         if !pulse_width.is_finite() || !(0.0..=1.0).contains(&pulse_width) {
             return Err(DataFusionError::Plan(
@@ -51,6 +53,7 @@ impl FrameSquareOscExec {
             frequency_hz,
             pulse_width,
             batch_frame_capacity: config.batch_frame_capacity(),
+            start_frame: config.start_frame(),
             properties,
         })
     }
@@ -99,8 +102,9 @@ impl ExecutionPlan for FrameSquareOscExec {
         let frequency_hz = self.frequency_hz;
         let pulse_width = self.pulse_width;
 
+        let start_frame = self.start_frame;
         let stream = async_stream::try_stream! {
-            let mut next_frame = 0_u64;
+            let mut next_frame = start_frame;
 
             loop {
                 let end_frame = next_frame

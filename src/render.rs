@@ -3,7 +3,9 @@ use datafusion::arrow::{
     datatypes::{Float32Type, SchemaRef, UInt64Type},
 };
 
-use crate::{Error::InvalidRender, RenderConfig, Result, layout::frame::frame_schema};
+use crate::{
+    Error::InvalidRender, ExecutionConfig, RenderConfig, Result, layout::frame::frame_schema,
+};
 
 pub fn decode_from_frames(batches: &[RecordBatch], config: &RenderConfig) -> Result<Vec<f32>> {
     if batches.is_empty() {
@@ -28,10 +30,11 @@ pub fn decode_from_frames(batches: &[RecordBatch], config: &RenderConfig) -> Res
     Ok(samples)
 }
 
-/// Validates successive frame batches and borrows their ordered samples.
-/// Call `finish` after the upstream stream ends to check exact finite coverage.
+/// Validates successive frame batches and exposes their ordered samples.
+/// For a finite stream, call `finish` after upstream ends to check exact coverage.
 pub struct FrameDecoder {
-    configured_frame_count: u64,
+    start_frame: u64,
+    end_frame: Option<u64>,
     expected_schema: SchemaRef,
     next_expected_frame: u64,
     batch_index: usize,
@@ -39,19 +42,32 @@ pub struct FrameDecoder {
 
 impl FrameDecoder {
     pub fn new(config: &RenderConfig) -> Self {
+        Self::with_end(config.as_ref(), Some(config.frame_count()))
+    }
+
+    /// Check schema, continuity and values from the execution origin with no
+    /// configured end frame.
+    pub fn continuous(config: &ExecutionConfig) -> Self {
+        Self::with_end(config, None)
+    }
+
+    fn with_end(config: &ExecutionConfig, end_frame: Option<u64>) -> Self {
         Self {
-            configured_frame_count: config.frame_count(),
+            start_frame: config.start_frame(),
+            end_frame,
             expected_schema: frame_schema(config),
-            next_expected_frame: 0,
+            next_expected_frame: config.start_frame(),
             batch_index: 0,
         }
     }
 
     pub fn finish(self) -> Result<()> {
-        if self.next_expected_frame != self.configured_frame_count {
+        if let Some(end) = self.end_frame
+            && self.next_expected_frame != end
+        {
             return Err(InvalidRender(format!(
-                "frame render ended early: first missing frame is {}; expected coverage 0..{}",
-                self.next_expected_frame, self.configured_frame_count,
+                "frame render ended early: first missing frame is {}; expected coverage {}..{end}",
+                self.next_expected_frame, self.start_frame,
             )));
         }
 
@@ -87,29 +103,35 @@ impl FrameDecoder {
                 ))
             })?;
 
+        let mut next_frame = self.next_expected_frame;
         for row_index in 0..batch.num_rows() {
-            self.next_sample(batch_index, row_index, frames, samples)?;
-            self.next_expected_frame =
-                self.next_expected_frame.checked_add(1).ok_or_else(|| {
-                    InvalidRender("decoded frame position overflowed UInt64".to_string())
-                })?;
+            self.validate_sample(next_frame, row_index, frames, samples)?;
+            next_frame = next_frame.checked_add(1).ok_or_else(|| {
+                InvalidRender(format!(
+                    "decoded frame position overflowed UInt64 after frame {next_frame} in batch {batch_index} row {row_index}"
+                ))
+            })?;
         }
 
+        self.next_expected_frame = next_frame;
         self.batch_index += 1;
         Ok(samples.values())
     }
 
-    fn next_sample(
+    fn validate_sample(
         &self,
-        batch_index: usize,
+        expected_frame: u64,
         row_index: usize,
         frames: &PrimitiveArray<UInt64Type>,
         samples: &PrimitiveArray<Float32Type>,
     ) -> Result<()> {
-        if self.next_expected_frame >= self.configured_frame_count {
+        let batch_index = self.batch_index;
+        if let Some(end) = self.end_frame
+            && expected_frame >= end
+        {
             return Err(InvalidRender(format!(
-                "unexpected extra frame in batch {batch_index} row {row_index}; expected coverage 0..{}",
-                self.configured_frame_count,
+                "unexpected extra frame in batch {batch_index} row {row_index}; expected coverage {}..{end}",
+                self.start_frame,
             )));
         }
         if frames.is_null(row_index) {
@@ -119,16 +141,14 @@ impl FrameDecoder {
         }
         if samples.is_null(row_index) {
             return Err(InvalidRender(format!(
-                "null sample at frame {} in batch {batch_index} row {row_index}",
-                self.next_expected_frame
+                "null sample at frame {expected_frame} in batch {batch_index} row {row_index}"
             )));
         }
 
         let actual_frame = frames.value(row_index);
-        if actual_frame != self.next_expected_frame {
+        if actual_frame != expected_frame {
             return Err(InvalidRender(format!(
-                "discontinuous frame sequence in batch {batch_index} row {row_index}: expected frame {}, got {actual_frame}",
-                self.next_expected_frame
+                "discontinuous frame sequence in batch {batch_index} row {row_index}: expected frame {expected_frame}, got {actual_frame}"
             )));
         }
 

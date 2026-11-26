@@ -12,7 +12,7 @@ use datafusion::{
 };
 use futures::StreamExt;
 
-use crate::{RenderConfig, layout::frame::frame_schema};
+use crate::{ExecutionConfig, layout::frame::frame_schema};
 
 /// Multiplies a normalized frame signal and saturates the result to [-1, 1].
 #[derive(Debug)]
@@ -24,7 +24,7 @@ pub struct FrameGainExec {
 
 impl FrameGainExec {
     pub fn try_new(
-        config: &RenderConfig,
+        config: &impl AsRef<ExecutionConfig>,
         input: Arc<dyn ExecutionPlan>,
         gain: f32,
     ) -> Result<Self> {

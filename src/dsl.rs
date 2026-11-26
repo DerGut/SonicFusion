@@ -1,13 +1,13 @@
 //! A small, deliberately fixed vocabulary for building frame execution plans
 //! from text. Statements are evaluated in order, so references must be defined
-//! before use. The render configuration supplies the final frame limit.
+//! before use. The offline entry point adds a finite limit to the same graph.
 
 use std::{collections::HashMap, sync::Arc};
 
 use datafusion::physical_plan::{ExecutionPlan, limit::GlobalLimitExec};
 
 use crate::{
-    RenderConfig,
+    ExecutionConfig, RenderConfig,
     physical::frame::{
         Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
         FrameSquareOscExec, low_pass,
@@ -75,6 +75,19 @@ struct Stage {
 /// `out`. Exactly one statement must end in `out`. Bindings are available to
 /// subsequent statements. `out` adds the configured finite frame limit.
 pub fn build_plan(source: &str, config: &RenderConfig) -> Result<Plan, DslError> {
+    let (root, out_at) = build_root(source, config.as_ref())?;
+    let limit = usize::try_from(config.frame_count())
+        .map_err(|_| error(source, out_at, "frame_count does not fit usize"))?;
+    Ok(Arc::new(GlobalLimitExec::new(root, 0, Some(limit))))
+}
+
+/// Build a live graph with no preview frame limit. All sources and stateful
+/// processors share the execution's absolute origin.
+pub fn build_live_plan(source: &str, config: &ExecutionConfig) -> Result<Plan, DslError> {
+    build_root(source, config).map(|(root, _)| root)
+}
+
+fn build_root(source: &str, config: &ExecutionConfig) -> Result<(Plan, usize), DslError> {
     let tokens = lex(source)?;
     let statements = Parser::new(source, tokens).parse()?;
     let mut bindings = HashMap::new();
@@ -124,9 +137,7 @@ pub fn build_plan(source: &str, config: &RenderConfig) -> Result<Plan, DslError>
                     let input = current
                         .take()
                         .ok_or_else(|| error(source, stage.at, "out requires an input"))?;
-                    let limit = usize::try_from(config.frame_count())
-                        .map_err(|_| error(source, stage.at, "frame_count does not fit usize"))?;
-                    output = Some(Arc::new(GlobalLimitExec::new(input, 0, Some(limit))) as Plan);
+                    output = Some((input, stage.at));
                 }
                 StageKind::Out => {
                     return Err(error(source, stage.at, "out must end a statement"));
@@ -148,7 +159,7 @@ pub fn build_plan(source: &str, config: &RenderConfig) -> Result<Plan, DslError>
 fn construct(
     source: &str,
     at: usize,
-    config: &RenderConfig,
+    config: &ExecutionConfig,
     bindings: &HashMap<String, Plan>,
     incoming: Option<Plan>,
     name: &str,
@@ -246,7 +257,7 @@ fn unary_args(
 fn lpf_args(
     source: &str,
     at: usize,
-    config: &RenderConfig,
+    config: &ExecutionConfig,
     bindings: &HashMap<String, Plan>,
     incoming: Option<Plan>,
     args: &[Arg],

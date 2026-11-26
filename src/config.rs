@@ -1,17 +1,75 @@
 use crate::{Error::InvalidConfig, Result};
 
+/// Immutable settings for one execution. The origin is an absolute session
+/// frame; DSP history and stream cursors start fresh on each execution.
+#[derive(Clone, Copy, Debug)]
+pub struct ExecutionConfig {
+    sample_rate_hz: u32,
+    batch_frame_capacity: usize,
+    start_frame: u64,
+}
+
+impl ExecutionConfig {
+    pub fn new(sample_rate_hz: u32, batch_frame_capacity: usize) -> Result<Self> {
+        if sample_rate_hz == 0 {
+            return Err(InvalidConfig(
+                "sample_rate_hz must be greater than 0".to_string(),
+            ));
+        }
+        if batch_frame_capacity == 0 {
+            return Err(InvalidConfig(
+                "batch_frame_capacity must be greater than 0".to_string(),
+            ));
+        }
+        Ok(Self {
+            sample_rate_hz,
+            batch_frame_capacity,
+            start_frame: 0,
+        })
+    }
+
+    /// Bind a new execution to a frame without changing the run settings.
+    pub fn at_frame(self, start_frame: u64) -> Self {
+        Self {
+            start_frame,
+            ..self
+        }
+    }
+
+    pub fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate_hz
+    }
+
+    pub fn batch_frame_capacity(&self) -> usize {
+        self.batch_frame_capacity
+    }
+
+    pub fn start_frame(&self) -> u64 {
+        self.start_frame
+    }
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self::new(48_000, 1024).expect("ExecutionConfig defaults must remain valid")
+    }
+}
+
+impl AsRef<ExecutionConfig> for ExecutionConfig {
+    fn as_ref(&self) -> &ExecutionConfig {
+        self
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RenderConfig {
-    sample_rate_hz: u32,
+    execution: ExecutionConfig,
     frame_count: u64,
-    batch_frame_capacity: usize,
     max_render_seconds: u64,
 }
 
 impl RenderConfig {
-    const DEFAULT_SAMPLE_RATE_HZ: u32 = 48_000;
     const DEFAULT_FRAME_COUNT: u64 = 48_000;
-    const DEFAULT_BATCH_FRAME_CAPACITY: usize = 1024;
     const DEFAULT_MAX_RENDER_SECONDS: u64 = 60;
 
     pub fn builder() -> RenderConfigBuilder {
@@ -19,7 +77,7 @@ impl RenderConfig {
     }
 
     pub fn sample_rate_hz(&self) -> u32 {
-        self.sample_rate_hz
+        self.execution.sample_rate_hz()
     }
 
     pub fn frame_count(&self) -> u64 {
@@ -27,7 +85,7 @@ impl RenderConfig {
     }
 
     pub fn batch_frame_capacity(&self) -> usize {
-        self.batch_frame_capacity
+        self.execution.batch_frame_capacity()
     }
 
     pub fn max_render_seconds(&self) -> u64 {
@@ -35,19 +93,9 @@ impl RenderConfig {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.sample_rate_hz == 0 {
-            return Err(InvalidConfig(
-                "sample_rate_hz must be greater than 0".to_string(),
-            ));
-        }
         if self.frame_count == 0 {
             return Err(InvalidConfig(
                 "frame_count must be greater than 0".to_string(),
-            ));
-        }
-        if self.batch_frame_capacity == 0 {
-            return Err(InvalidConfig(
-                "batch_frame_capacity must be greater than 0".to_string(),
             ));
         }
         if self.max_render_seconds == 0 {
@@ -56,7 +104,7 @@ impl RenderConfig {
             ));
         }
 
-        let max_frame_count = u64::from(self.sample_rate_hz)
+        let max_frame_count = u64::from(self.sample_rate_hz())
             .checked_mul(self.max_render_seconds)
             .ok_or_else(|| {
                 InvalidConfig(
@@ -66,11 +114,19 @@ impl RenderConfig {
         if self.frame_count > max_frame_count {
             return Err(InvalidConfig(format!(
                 "frame_count {} exceeds configured maximum {max_frame_count} ({} Hz × {} s)",
-                self.frame_count, self.sample_rate_hz, self.max_render_seconds
+                self.frame_count,
+                self.sample_rate_hz(),
+                self.max_render_seconds
             )));
         }
 
         Ok(())
+    }
+}
+
+impl AsRef<ExecutionConfig> for RenderConfig {
+    fn as_ref(&self) -> &ExecutionConfig {
+        &self.execution
     }
 }
 
@@ -92,16 +148,16 @@ pub struct RenderConfigBuilder {
 
 impl RenderConfigBuilder {
     pub fn build(self) -> Result<RenderConfig> {
+        let defaults = ExecutionConfig::default();
         let config = RenderConfig {
-            sample_rate_hz: self
-                .sample_rate_hz
-                .unwrap_or(RenderConfig::DEFAULT_SAMPLE_RATE_HZ),
+            execution: ExecutionConfig::new(
+                self.sample_rate_hz.unwrap_or(defaults.sample_rate_hz()),
+                self.batch_frame_capacity
+                    .unwrap_or(defaults.batch_frame_capacity()),
+            )?,
             frame_count: self
                 .frame_count
                 .unwrap_or(RenderConfig::DEFAULT_FRAME_COUNT),
-            batch_frame_capacity: self
-                .batch_frame_capacity
-                .unwrap_or(RenderConfig::DEFAULT_BATCH_FRAME_CAPACITY),
             max_render_seconds: self
                 .max_render_seconds
                 .unwrap_or(RenderConfig::DEFAULT_MAX_RENDER_SECONDS),
