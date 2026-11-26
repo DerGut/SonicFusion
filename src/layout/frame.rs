@@ -2,18 +2,19 @@ use std::collections::HashMap;
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 
-use crate::RenderConfig;
+use crate::ExecutionConfig;
 
 /// Exact mono frame-signal schema, including sample-rate and layout metadata.
 /// Frame samples are finite, unitless values in [-1, 1].
-pub fn frame_schema(config: &RenderConfig) -> SchemaRef {
+pub fn frame_schema(config: &impl AsRef<ExecutionConfig>) -> SchemaRef {
     SchemaRef::new(frame_schema_val(config))
 }
 
 /// Returns an owned Schema value. This should only be used by tests
 /// that need to further modify the schema. Otherwise, this is backing
 /// the intended API [`frame_schema`].
-pub(crate) fn frame_schema_val(config: &RenderConfig) -> Schema {
+pub(crate) fn frame_schema_val(config: &impl AsRef<ExecutionConfig>) -> Schema {
+    let config = config.as_ref();
     let frame = Field::new("frame", DataType::UInt64, false);
     let sample = Field::new("sample", DataType::Float32, false);
 
@@ -33,6 +34,7 @@ pub(crate) fn frame_schema_val(config: &RenderConfig) -> Schema {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RenderConfig;
 
     #[test]
     fn test_frame_schema_contract() {

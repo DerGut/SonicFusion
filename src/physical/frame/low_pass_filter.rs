@@ -15,7 +15,7 @@ use datafusion::{
 };
 use futures::StreamExt;
 
-use crate::{RenderConfig, layout::frame::frame_schema};
+use crate::{ExecutionConfig, layout::frame::frame_schema};
 
 use super::plan::FramePlan;
 
@@ -23,7 +23,7 @@ use super::plan::FramePlan;
 pub enum Cutoff {
     /// A fixed cutoff strictly between zero and Nyquist, in hertz.
     ConstantHz(f64),
-    /// A signal with one finite sample in [-1, 1] at every frame from zero through
+    /// A signal with one finite sample in [-1, 1] at every frame from the execution origin through
     /// the last audio frame, including audio gaps. Later samples are ignored.
     Modulated { cutoff: FramePlan },
 }
@@ -34,7 +34,12 @@ pub enum Cutoff {
 /// mapping is 1,000 ± 900 Hz when the sample rate permits; at lower rates it
 /// scales below Nyquist. The audio input and any modulation input must each
 /// have one partition at execution.
-pub fn low_pass(config: &RenderConfig, audio: FramePlan, cutoff: Cutoff) -> Result<FramePlan> {
+pub fn low_pass(
+    config: &impl AsRef<ExecutionConfig>,
+    audio: FramePlan,
+    cutoff: Cutoff,
+) -> Result<FramePlan> {
+    let config = config.as_ref();
     let plan = match cutoff {
         Cutoff::ConstantHz(hz) => FrameLowPassFilterExec::try_new(config, audio.into_plan(), hz)?,
         Cutoff::Modulated { cutoff } => {
@@ -51,7 +56,7 @@ pub fn low_pass(config: &RenderConfig, audio: FramePlan, cutoff: Cutoff) -> Resu
     FramePlan::try_from_plan(config, Arc::new(plan))
 }
 
-fn default_cutoff_mapping(config: &RenderConfig) -> (f64, f64) {
+fn default_cutoff_mapping(config: &ExecutionConfig) -> (f64, f64) {
     let nyquist_hz = f64::from(config.sample_rate_hz()) / 2.0;
     let base_hz = 1000.0_f64.min(nyquist_hz / 2.0);
     let depth_hz = 900.0_f64.min(base_hz * 0.9);
@@ -81,12 +86,13 @@ fn mapped_cutoff(
 /// `a[n] = 1 - exp(-2 * PI * cutoff_hz[n] / sample_rate_hz)`. Missing audio
 /// frames advance the filter with zero input, without adding output rows.
 /// A modulation child must provide one normalized sample for every integer
-/// frame from zero through the last audio frame, including audio gaps.
+/// frame from the execution origin through the last audio frame, including audio gaps.
 /// Each child must have one partition at execution so state stays continuous.
 #[derive(Debug)]
 pub struct FrameLowPassFilterExec {
     input: Arc<dyn ExecutionPlan>,
     cutoff: CutoffState,
+    start_frame: u64,
     properties: Arc<PlanProperties>,
 }
 
@@ -130,13 +136,18 @@ impl<'a> AudioBatch<'a> {
         Ok(Self { frames, samples })
     }
 
-    fn row(&self, row: usize, last_frame: Option<u64>) -> Result<(u64, f32)> {
+    fn row(&self, row: usize, last_frame: Option<u64>, start_frame: u64) -> Result<(u64, f32)> {
         if self.frames.is_null(row) || self.samples.is_null(row) {
             return Err(DataFusionError::Execution(
                 "FrameLowPassFilterExec received a null audio frame or sample".into(),
             ));
         }
         let frame = self.frames.value(row);
+        if frame < start_frame {
+            return Err(DataFusionError::Execution(format!(
+                "FrameLowPassFilterExec input frame {frame} precedes execution origin {start_frame}"
+            )));
+        }
         if let Some(last) = last_frame
             && frame <= last
         {
@@ -152,10 +163,11 @@ impl<'a> AudioBatch<'a> {
 
 impl FrameLowPassFilterExec {
     pub fn try_new(
-        config: &RenderConfig,
+        config: &impl AsRef<ExecutionConfig>,
         input: Arc<dyn ExecutionPlan>,
         cutoff_hz: f64,
     ) -> Result<Self> {
+        let config = config.as_ref();
         super::validate_frequency(cutoff_hz, config.sample_rate_hz(), "cutoff_hz")?;
         if cutoff_hz == 0.0 {
             return Err(DataFusionError::Plan(
@@ -177,18 +189,20 @@ impl FrameLowPassFilterExec {
                 alpha: -exponent.exp_m1(),
                 decay: exponent.exp(),
             },
+            config.start_frame(),
         ))
     }
 
     /// Maps a normalized frame signal to `base_hz + depth_hz * sample`.
     /// Both mapped endpoints must be strictly inside (0, Nyquist).
     pub fn try_new_modulated(
-        config: &RenderConfig,
+        config: &impl AsRef<ExecutionConfig>,
         input: Arc<dyn ExecutionPlan>,
         cutoff: Arc<dyn ExecutionPlan>,
         base_hz: f64,
         depth_hz: f64,
     ) -> Result<Self> {
+        let config = config.as_ref();
         let schema = frame_schema(config);
         Self::validate_input_schema(input.as_ref(), &schema)?;
         Self::validate_input_schema(cutoff.as_ref(), &schema)?;
@@ -220,10 +234,11 @@ impl FrameLowPassFilterExec {
                 depth_hz,
                 sample_rate_hz: config.sample_rate_hz(),
             },
+            config.start_frame(),
         ))
     }
 
-    fn new(input: Arc<dyn ExecutionPlan>, cutoff: CutoffState) -> Self {
+    fn new(input: Arc<dyn ExecutionPlan>, cutoff: CutoffState, start_frame: u64) -> Self {
         let mut equivalence = EquivalenceProperties::new(input.schema());
         equivalence.add_ordering(super::frame_ordering());
         let emission_type = match &cutoff {
@@ -241,6 +256,7 @@ impl FrameLowPassFilterExec {
         Self {
             input,
             cutoff,
+            start_frame,
             properties,
         }
     }
@@ -265,13 +281,14 @@ impl FrameLowPassFilterExec {
         let schema = self.schema();
         let mut state = 0.0_f64;
         let mut last_frame = None;
+        let start_frame = self.start_frame;
         let stream = self.input.execute(partition, context)?.map(move |batch| {
             let batch = batch?;
             let audio = AudioBatch::new(&batch, &schema)?;
 
             let mut filtered = Vec::with_capacity(batch.num_rows());
             for row in 0..batch.num_rows() {
-                let (frame, sample) = audio.row(row, last_frame)?;
+                let (frame, sample) = audio.row(row, last_frame, start_frame)?;
                 let elapsed = match last_frame {
                     Some(last) => frame - last,
                     None => 1,
@@ -315,10 +332,11 @@ impl FrameLowPassFilterExec {
         let mut audio = self.input.execute(partition, Arc::clone(&context))?;
         let modulation = cutoff.execute(partition, context)?;
         let mut cursor = ModulationCursor::new(modulation, Arc::clone(&schema));
+        let start_frame = self.start_frame;
         let output = async_stream::try_stream! {
             let mut state = 0.0_f64;
             let mut last_audio_frame = None;
-            let mut next_frame = 0_u128;
+            let mut next_frame = u128::from(start_frame);
 
             while let Some(batch) = audio.next().await {
                 let batch = batch?;
@@ -326,7 +344,7 @@ impl FrameLowPassFilterExec {
                 let mut filtered = Vec::with_capacity(batch.num_rows());
 
                 for row in 0..batch.num_rows() {
-                    let (frame, sample) = audio_batch.row(row, last_audio_frame)?;
+                    let (frame, sample) = audio_batch.row(row, last_audio_frame, start_frame)?;
                     while next_frame <= u128::from(frame) {
                         let modulation = cursor.next_sample(next_frame).await?;
                         let cutoff = mapped_cutoff(
@@ -426,7 +444,7 @@ impl ExecutionPlan for FrameLowPassFilterExec {
                 }
             }
         };
-        Ok(Arc::new(Self::new(input, cutoff)))
+        Ok(Arc::new(Self::new(input, cutoff, self.start_frame)))
     }
 
     fn execute(
@@ -871,11 +889,11 @@ mod tests {
     #[test]
     fn default_cutoff_mapping_preserves_preview_range_and_fits_low_rates() {
         assert_eq!(
-            default_cutoff_mapping(&RenderConfig::default()),
+            default_cutoff_mapping(RenderConfig::default().as_ref()),
             (1000.0, 900.0)
         );
         let low_rate = config();
-        let (base, depth) = default_cutoff_mapping(&low_rate);
+        let (base, depth) = default_cutoff_mapping(low_rate.as_ref());
         assert_eq!((base, depth), (2.0, 1.8));
         assert!(base - depth > 0.0);
         assert!(base + depth < f64::from(low_rate.sample_rate_hz()) / 2.0);

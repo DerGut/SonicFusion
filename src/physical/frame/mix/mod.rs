@@ -22,7 +22,7 @@ use datafusion::{
 };
 
 use crate::{
-    RenderConfig, layout::frame::frame_schema, physical::frame::mix::cursor::FrameMergeCursor,
+    ExecutionConfig, layout::frame::frame_schema, physical::frame::mix::cursor::FrameMergeCursor,
 };
 
 /// Mixes matching frames from all inputs. An input that ends contributes silence;
@@ -40,7 +40,7 @@ pub struct FrameMixExec {
 
 impl FrameMixExec {
     pub fn try_new(
-        config: &RenderConfig,
+        config: &impl AsRef<ExecutionConfig>,
         inputs: Vec<Arc<dyn ExecutionPlan>>,
         gains: Vec<f32>,
     ) -> Result<Self> {
@@ -48,7 +48,7 @@ impl FrameMixExec {
             inputs,
             gains,
             frame_schema(config),
-            config.batch_frame_capacity(),
+            config.as_ref().batch_frame_capacity(),
         )
     }
 

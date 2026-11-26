@@ -11,7 +11,7 @@ use datafusion::{
     },
 };
 
-use crate::{RenderConfig, dsp, layout::frame::frame_schema};
+use crate::{ExecutionConfig, dsp, layout::frame::frame_schema};
 
 /// Generates an unbounded frame stream of bipolar rising sawtooth samples.
 /// Each cycle starts at -1 and rises toward +1 before wrapping back to -1.
@@ -22,11 +22,16 @@ pub struct FrameSawToothOscExec {
     sample_rate_hz: u32,
     frequency_hz: f64,
     batch_frame_capacity: usize,
+    start_frame: u64,
     properties: Arc<PlanProperties>,
 }
 
 impl FrameSawToothOscExec {
-    pub fn try_new(config: &RenderConfig, frequency_hz: f64) -> datafusion::error::Result<Self> {
+    pub fn try_new(
+        config: &impl AsRef<ExecutionConfig>,
+        frequency_hz: f64,
+    ) -> datafusion::error::Result<Self> {
+        let config = config.as_ref();
         super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
         let mut equivalence = EquivalenceProperties::new(frame_schema(config));
         equivalence.add_ordering(super::frame_ordering());
@@ -43,6 +48,7 @@ impl FrameSawToothOscExec {
             sample_rate_hz: config.sample_rate_hz(),
             frequency_hz,
             batch_frame_capacity: config.batch_frame_capacity(),
+            start_frame: config.start_frame(),
             properties,
         })
     }
@@ -90,8 +96,9 @@ impl ExecutionPlan for FrameSawToothOscExec {
         let sample_rate_hz = self.sample_rate_hz;
         let frequency_hz = self.frequency_hz;
 
+        let start_frame = self.start_frame;
         let stream = async_stream::try_stream! {
-            let mut next_frame = 0_u64;
+            let mut next_frame = start_frame;
 
             loop {
                 let end_frame = next_frame

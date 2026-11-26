@@ -11,19 +11,24 @@ use datafusion::{
     },
 };
 
-use crate::{RenderConfig, dsp, layout::frame::frame_schema};
+use crate::{ExecutionConfig, dsp, layout::frame::frame_schema};
 
 #[derive(Debug)]
 pub struct FrameSineOscExec {
     sample_rate_hz: u32,
     frequency_hz: f64,
     batch_frame_capacity: usize,
+    start_frame: u64,
 
     properties: Arc<PlanProperties>,
 }
 
 impl FrameSineOscExec {
-    pub fn try_new(config: &RenderConfig, frequency_hz: f64) -> datafusion::error::Result<Self> {
+    pub fn try_new(
+        config: &impl AsRef<ExecutionConfig>,
+        frequency_hz: f64,
+    ) -> datafusion::error::Result<Self> {
+        let config = config.as_ref();
         super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
         let schema = frame_schema(config);
         let mut equivalence = EquivalenceProperties::new(schema);
@@ -41,6 +46,7 @@ impl FrameSineOscExec {
             sample_rate_hz: config.sample_rate_hz(),
             frequency_hz,
             batch_frame_capacity: config.batch_frame_capacity(),
+            start_frame: config.start_frame(),
             properties,
         })
     }
@@ -90,8 +96,9 @@ impl ExecutionPlan for FrameSineOscExec {
         let sample_rate = self.sample_rate_hz;
         let frequency = self.frequency_hz;
 
+        let start_frame = self.start_frame;
         let stream = async_stream::try_stream! {
-            let mut next_frame = 0_u64;
+            let mut next_frame = start_frame;
 
             loop {
                 let end_frame = next_frame
