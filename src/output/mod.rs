@@ -1,7 +1,9 @@
+mod chunk;
 mod wav;
 mod waveform;
 
-pub use wav::{StreamingWavStats, write_streaming_wav, write_wav};
+pub use chunk::AudioChunk;
+pub use wav::{StreamingWavStats, write_streaming_wav, write_streaming_wav_at, write_wav};
 pub use waveform::write_waveform_svg;
 
 use crate::{Error::InvalidRender, RenderConfig, Result};

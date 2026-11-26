@@ -19,10 +19,23 @@ pub struct StreamingWavStats {
 /// Dropping this future cancels the stream and removes its temporary WAV.
 pub async fn write_streaming_wav(
     path: impl AsRef<Path>,
-    mut stream: SendableRecordBatchStream,
+    stream: SendableRecordBatchStream,
     config: &RenderConfig,
 ) -> Result<StreamingWavStats> {
+    write_streaming_wav_at(path, stream, config, 0).await
+}
+
+/// Record exactly the configured number of frames starting at `start_frame`.
+/// The origin is used for validation only: the WAV starts with that frame's
+/// sample, without leading silence or an absolute timestamp in its header.
+pub async fn write_streaming_wav_at(
+    path: impl AsRef<Path>,
+    mut stream: SendableRecordBatchStream,
+    config: &RenderConfig,
+    start_frame: u64,
+) -> Result<StreamingWavStats> {
     let started = Instant::now();
+    let mut decoder = FrameDecoder::finite_at(config, start_frame)?;
     let path = path.as_ref();
     let parent = path
         .parent()
@@ -35,22 +48,19 @@ pub async fn write_streaming_wav(
         .map_err(|source| wav_error("create temporary", path, source.into()))?;
 
     let spec = wav_spec(config);
-    let mut decoder = FrameDecoder::new(config);
     let mut first_decoded_batch = None;
     {
         let mut writer = hound::WavWriter::new(temporary.as_file_mut(), spec)
             .map_err(|source| wav_error("create", path, source))?;
-        let mut next_frame = 0_u64;
         while let Some(batch) = stream.try_next().await? {
-            let chunk = decoder.decode_batch(&batch)?;
+            let chunk = decoder.decode_chunk(&batch)?;
             if first_decoded_batch.is_none() && !chunk.is_empty() {
                 first_decoded_batch = Some(started.elapsed());
             }
-            for &sample in chunk {
-                writer.write_sample(sample).map_err(|source| {
-                    wav_error(format!("write frame {next_frame} to"), path, source)
-                })?;
-                next_frame += 1;
+            for (frame, &sample) in chunk.frame_range().zip(chunk.samples()) {
+                writer
+                    .write_sample(sample)
+                    .map_err(|source| wav_error(format!("write frame {frame} to"), path, source))?;
             }
         }
         decoder.finish()?;

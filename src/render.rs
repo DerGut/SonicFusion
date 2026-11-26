@@ -4,7 +4,8 @@ use datafusion::arrow::{
 };
 
 use crate::{
-    Error::InvalidRender, ExecutionConfig, RenderConfig, Result, layout::frame::frame_schema,
+    AudioChunk, Error::InvalidRender, ExecutionConfig, RenderConfig, Result,
+    layout::frame::frame_schema,
 };
 
 pub fn decode_from_frames(batches: &[RecordBatch], config: &RenderConfig) -> Result<Vec<f32>> {
@@ -45,6 +46,20 @@ impl FrameDecoder {
         Self::with_end(config.as_ref(), Some(config.frame_count()))
     }
 
+    /// Validate exactly `config.frame_count()` frames starting at an absolute origin.
+    pub fn finite_at(config: &RenderConfig, start_frame: u64) -> Result<Self> {
+        let end = start_frame.checked_add(config.frame_count()).ok_or_else(|| {
+            InvalidRender(format!(
+                "finite render of {} frames from {start_frame} overflows the UInt64 frame domain",
+                config.frame_count()
+            ))
+        })?;
+        Ok(Self::with_end(
+            &config.as_ref().at_frame(start_frame),
+            Some(end),
+        ))
+    }
+
     /// Check schema, continuity and values from the execution origin with no
     /// configured end frame.
     pub fn continuous(config: &ExecutionConfig) -> Self {
@@ -75,6 +90,18 @@ impl FrameDecoder {
     }
 
     pub fn decode_batch<'a>(&mut self, batch: &'a RecordBatch) -> Result<&'a [f32]> {
+        Ok(self.validate_batch(batch)?.values())
+    }
+
+    /// Validate a batch and take a shared reference to its sample buffer. The
+    /// returned chunk can outlive the batch without copying any samples.
+    pub fn decode_chunk(&mut self, batch: &RecordBatch) -> Result<AudioChunk> {
+        let start_frame = self.next_expected_frame;
+        let samples = self.validate_batch(batch)?;
+        Ok(AudioChunk::validated(start_frame, samples.values().clone()))
+    }
+
+    fn validate_batch<'a>(&mut self, batch: &'a RecordBatch) -> Result<&'a Float32Array> {
         let batch_index = self.batch_index;
         if batch.schema() != self.expected_schema {
             return Err(InvalidRender(format!(
@@ -115,7 +142,7 @@ impl FrameDecoder {
 
         self.next_expected_frame = next_frame;
         self.batch_index += 1;
-        Ok(samples.values())
+        Ok(samples)
     }
 
     fn validate_sample(
