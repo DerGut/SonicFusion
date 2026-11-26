@@ -8,7 +8,10 @@ mod render;
 
 pub use config::{ExecutionConfig, RenderConfig, RenderConfigBuilder};
 pub use layout::frame::frame_schema;
-pub use output::{StreamingWavStats, write_streaming_wav, write_wav, write_waveform_svg};
+pub use output::{
+    AudioChunk, StreamingWavStats, write_streaming_wav, write_streaming_wav_at, write_wav,
+    write_waveform_svg,
+};
 pub use render::{FrameDecoder, decode_from_frames};
 
 pub type Result<T> = std::result::Result<T, Error>;
