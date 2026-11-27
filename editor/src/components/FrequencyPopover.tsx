@@ -25,12 +25,35 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   const panel = useRef<HTMLDivElement>(null);
   const exact = useRef<HTMLInputElement>(null);
   const [text, setText] = useState<string | null>(null);
+  const pendingText = useRef<string | null>(null);
   const [browsedOctave, setBrowsedOctave] = useState<number | null>(null);
   const floorHz = Math.max(min, PITCH_FLOOR_HZ);
   const detune = pitch && detuneBounds(pitch.midi, floorHz, max);
   const lowestOctave = octaveOf(Math.ceil(hzToMidi(floorHz)));
   const highestOctave = Math.max(lowestOctave, octaveOf(Math.floor(hzToMidi(max))) - 1);
   const octave = Math.min(highestOctave, Math.max(lowestOctave, browsedOctave ?? octaveOf(pitch?.midi ?? 0)));
+
+  const updateText = (draft: string | null) => {
+    pendingText.current = draft;
+    setText(draft);
+  };
+  const commit = (report: boolean) => {
+    const draft = pendingText.current;
+    if (draft === null) return;
+    const hz = draft.trim() ? parseFrequency(draft) : NaN;
+    if (!Number.isFinite(hz) && report) {
+      exact.current?.setCustomValidity("Enter a frequency in Hz or a note such as C#4.");
+      exact.current?.reportValidity();
+      return;
+    }
+    // Consume the draft before updating the graph. A click can trigger both blur and submit.
+    updateText(null);
+    exact.current?.setCustomValidity("");
+    if (Number.isFinite(hz) && hz !== value) {
+      onFrequency(hz);
+      setBrowsedOctave(null);
+    }
+  };
 
   useLayoutEffect(() => {
     const element = panel.current;
@@ -52,7 +75,11 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
     resize.observe(element);
     const dismissOutside = (event: Event) => {
       const target = event.target;
-      if (target instanceof Node && !element.contains(target) && !button.contains(target)) onClose();
+      if (target instanceof Node && !element.contains(target)) {
+        // A pointer can dismiss the overlay before the input would lose focus naturally.
+        exact.current?.blur();
+        if (!button.contains(target) || event.type === "wheel") onClose();
+      }
     };
     window.addEventListener("resize", place);
     window.addEventListener("pointerdown", dismissOutside, true);
@@ -68,6 +95,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   }, [anchor, onClose]);
 
   const closeAndFocus = () => {
+    exact.current?.blur();
     onClose();
     anchor.current?.focus({ preventScroll: true });
   };
@@ -79,6 +107,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
+          updateText(null);
           closeAndFocus();
         }
       }}>
@@ -110,8 +139,8 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
                   style={boundary ? { left: (Math.floor(index / 12) * WHITE_KEYS_PER_OCTAVE + boundary) * 100 / (2 * WHITE_KEYS_PER_OCTAVE) + "%" } : undefined}
                   onClick={() => {
                     setBrowsedOctave(octave);
-                    setText(null);
-                    onPitch(next, false);
+                    updateText(null);
+                    if (midi !== pitch.midi) onPitch(next, false);
                   }} />
               );
             })}
@@ -125,7 +154,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
               <ParameterRange id={id + "-detune"} min={detune.min} max={detune.max} step={DETUNE_STEP} position={pitch.cents}
                 valueText={formatCents(pitch.cents)} onBeginContinuous={onBeginContinuous}
                 onMove={(cents) => {
-                  setText(null);
+                  updateText(null);
                   onPitch({ midi: pitch.midi, cents }, true);
                 }} />
             </>
@@ -134,24 +163,18 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
       )}
       <form className="frequency-exact" onSubmit={(event) => {
         event.preventDefault();
-        if (text === null || text === String(value)) return;
-        const hz = text.trim() ? parseFrequency(text) : NaN;
-        if (!Number.isFinite(hz)) {
-          exact.current?.setCustomValidity("Enter a frequency in Hz or a note such as C#4.");
-          exact.current?.reportValidity();
-          return;
-        }
-        onFrequency(hz);
-        setText(null);
-        setBrowsedOctave(null);
+        commit(true);
       }}>
         <label htmlFor={id + "-exact"}>Hz or note</label>
         <input id={id + "-exact"} ref={exact} className="value-input nodrag" value={text ?? String(value)}
-          onFocus={(event) => event.currentTarget.select()} onChange={(event) => {
+          onFocus={(event) => event.currentTarget.select()} onBlur={() => commit(false)} onChange={(event) => {
             event.currentTarget.setCustomValidity("");
-            setText(event.currentTarget.value);
+            updateText(event.currentTarget.value);
           }} />
-        <button type="submit">Set</button>
+        <button type="submit" onPointerDown={(event) => {
+          // A pointer submit reports syntax errors before blur can clear the draft.
+          if (document.activeElement === exact.current) event.preventDefault();
+        }}>Set</button>
       </form>
     </div>,
     document.body,

@@ -171,13 +171,13 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .value-input { width: 86px; height: 20px; padding: 0 4px; border: 1px solid var(--control); border-radius: 4px; background: #0f1216; font-family: var(--mono); font-size: 11.5px; text-align: right; }
 
 .param.modulated .param-top, .param.modulated .value { color: var(--control-soft); }
-.param.modulated .value { cursor: inherit; }
 .param-note { margin: 0; font-size: 11px; color: var(--muted); }
 .range { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 4px; margin: 0; border-radius: 2px; background: var(--track); cursor: ew-resize; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); box-shadow: 0 0 0 1px #4a5361; }
 .range::-moz-range-thumb { width: 8px; height: 8px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); }
 .param.invalid .range { --fill: var(--error); }
 
+.param.modulated .value { cursor: inherit; }
 .param.modulated .param-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .frequency-row .param-top { gap: 4px; }
 .frequency-values { min-width: 0; display: flex; align-items: baseline; gap: 4px; }

@@ -195,10 +195,12 @@ export function moveNodes(doc: EditorDocument, positions: Map<string, Position>)
 }
 
 export function setParam(doc: EditorDocument, id: string, name: string, value: ParamValue): EditorDocument {
+  const node = doc.nodes.find((candidate) => candidate.id === id);
+  if (!node || node.params[name] === value) return doc;
   return {
     ...doc,
-    nodes: doc.nodes.map((node) =>
-      node.id === id ? { ...node, params: { ...node.params, [name]: value } } : node,
+    nodes: doc.nodes.map((candidate) =>
+      candidate === node ? { ...node, params: { ...node.params, [name]: value } } : candidate,
     ),
   };
 }
