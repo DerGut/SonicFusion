@@ -29,7 +29,7 @@ use sonicfusion::{
     AudioChunk, Error, ExecutionConfig, Result,
     dsl::build_live_plan,
     frame_schema,
-    runtime::{PacedOutput, RunExit, SynthRuntime},
+    runtime::{PacedOutput, ReplacementEvent, RunExit, SynthRuntime},
 };
 use tokio::sync::mpsc;
 
@@ -136,10 +136,20 @@ async fn stop_wakes_a_pending_root_poll_without_admitting_audio() {
             .is_pending()
     );
     assert_eq!(probe.polls.load(Relaxed), 2);
+    let mut request = control.submit_replacement("sine(7) -> out");
+    assert!(matches!(
+        request.next_event().await,
+        Some(ReplacementEvent::Accepted)
+    ));
     control.stop();
     assert!(wake_count.0.load(Relaxed) > 0);
     assert_eq!(run.await.unwrap(), RunExit::Stopped);
     assert_eq!(probe.dropped.load(Relaxed), 1);
+    assert!(matches!(
+        request.next_event().await,
+        Some(ReplacementEvent::RunClosed)
+    ));
+    assert!(request.next_event().await.is_none());
     assert!(output.chunks.is_empty());
     assert_eq!(control.next_output_frame(), 41);
 }

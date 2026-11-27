@@ -56,3 +56,19 @@ ready audio runs out. On stop, the example reports frames admitted to the queue,
 graph frames consumed, and device frames submitted (including inserted silence).
 These are not measurements of what has already reached the listener. Stopping
 discards any queued audio; this example does not reload or replace a circuit.
+
+### Replacing a circuit from Rust
+
+Use `runtime.control().submit_replacement(dsl)` from a Tokio runtime to submit a
+complete live circuit without reopening the device. Preparation runs on Tokio's
+blocking pool with the session's existing sample rate and batch size. The returned
+request has a revision and reports events via `next_event().await`. A valid request
+can supersede the one pending replacement; invalid requests do not displace it.
+
+The producer reports `Scheduled { frame }` when it selects the next root window
+and `Applied { frame }` once the new stream is installed. The frame is an absolute
+graph frame, not a playback timestamp: previously queued audio is left in order,
+and the new stream may not have produced audio yet. The old window (including any
+retained remainder) finishes first. A rejected replacement keeps the old circuit;
+a later stream or output failure stops the run. New processors start with fresh
+state. Clicks and discarded old filter tails are possible; there is no crossfade.

@@ -32,11 +32,7 @@ impl FrameSquareOscExec {
     ) -> datafusion::error::Result<Self> {
         let config = config.as_ref();
         super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
-        if !pulse_width.is_finite() || !(0.0..=1.0).contains(&pulse_width) {
-            return Err(DataFusionError::Plan(
-                "pulse_width must be finite and between 0 and 1 inclusive".into(),
-            ));
-        }
+        validate_pulse_width(pulse_width)?;
         let mut equivalence = EquivalenceProperties::new(frame_schema(config));
         equivalence.add_ordering(super::frame_ordering());
         let properties = Arc::new(PlanProperties::new(
@@ -57,6 +53,15 @@ impl FrameSquareOscExec {
             properties,
         })
     }
+}
+
+pub(crate) fn validate_pulse_width(pulse_width: f64) -> datafusion::error::Result<()> {
+    if !pulse_width.is_finite() || !(0.0..=1.0).contains(&pulse_width) {
+        return Err(DataFusionError::Plan(
+            "pulse_width must be finite and between 0 and 1 inclusive".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl ExecutionPlan for FrameSquareOscExec {
