@@ -72,11 +72,15 @@ export function Canvas(props: Props) {
   useEffect(() => {
     const sourcesByNode = new Map<string, Record<string, string>>();
     const outgoingByNode = new Map<string, string[]>();
+    const portsByNode = new Map(doc.nodes.map((node) => [node.id, inputPorts(node, catalog)]));
+    const controlSources = new Set<string>();
     for (const wire of doc.wires) {
       const sources = sourcesByNode.get(wire.to.node) ?? {};
       sources[wire.to.port] = wire.from;
       sourcesByNode.set(wire.to.node, sources);
       outgoingByNode.set(wire.from, [...(outgoingByNode.get(wire.from) ?? []), wireId(wire)]);
+      const port = portsByNode.get(wire.to.node)?.find((candidate) => candidate.name === wire.to.port);
+      if (port?.signal === "control") controlSources.add(wire.from);
     }
     {
       const old = new Map(nodesRef.current.map((node) => [node.id, node]));
@@ -87,9 +91,10 @@ export function Canvas(props: Props) {
         const data: SfNodeData = {
           node,
           descriptor,
-          ports: inputPorts(node, catalog),
+          ports: portsByNode.get(node.id) ?? [],
           sources: sourcesByNode.get(node.id) ?? {},
           outgoing: outgoingByNode.get(node.id) ?? [],
+          feedsControl: controlSources.has(node.id),
           issues: issues.filter((issue) => issue.node === node.id),
           session,
           ceilingDb,
@@ -287,6 +292,7 @@ function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
     a.session === b.session &&
     a.ceilingDb === b.ceilingDb &&
     a.actions === b.actions &&
+    a.feedsControl === b.feedsControl &&
     JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
     JSON.stringify(a.sources) === JSON.stringify(b.sources) &&
     JSON.stringify(a.outgoing) === JSON.stringify(b.outgoing) &&

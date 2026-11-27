@@ -1,3 +1,6 @@
+export const PITCH_FLOOR_HZ = 20;
+export type FrequencyMode = "hz" | "note";
+
 const A4_HZ = 440;
 const A4_MIDI = 69;
 const SEMITONES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -27,6 +30,20 @@ export function pitchFromHz(hz: number, reference?: number): Pitch | null {
   return { midi, cents: (semitone - midi) * 100 };
 }
 
+export function defaultFrequencyMode(hz: number, feedsControl: boolean): FrequencyMode {
+  return feedsControl || !(hz >= PITCH_FLOOR_HZ) ? "hz" : "note";
+}
+
+/** A semitone within the slider range, or free Hz for subaudio rates. */
+export function snapSliderHz(hz: number, min: number, max: number, direction = 0): number {
+  if (!(hz >= PITCH_FLOOR_HZ) && direction === 0) return hz;
+  const first = Math.ceil(hzToMidi(Math.max(min, PITCH_FLOOR_HZ)));
+  const last = Math.floor(hzToMidi(max));
+  if (first > last) return hz;
+  const nearest = Math.round(hzToMidi(hz)) + direction;
+  return pitchToHz({ midi: Math.min(last, Math.max(first, nearest)), cents: 0 });
+}
+
 export function noteName(midi: number): string {
   const step = ((midi % 12) + 12) % 12;
   return SEMITONES[step] + (Math.floor(midi / 12) - 1);
@@ -37,11 +54,6 @@ export function formatCents(cents: number): string {
   return (rounded > 0 ? "+" : "") + rounded + "¢";
 }
 
-export function formatPitch(pitch: Pitch): string {
-  const name = noteName(pitch.midi);
-  return Math.abs(pitch.cents) < 0.05 ? name : name + " " + formatCents(pitch.cents);
-}
-
 /** Numeric input remains Hz in either mode. Notes can include an explicit cents offset. */
 export function parseFrequency(text: string): number {
   const match = /^([A-G])([#b♯♭]?)(-?\d+)(?:\s*([+-]\d+(?:\.\d+)?)\s*[c¢])?$/i.exec(text.trim());
@@ -49,8 +61,9 @@ export function parseFrequency(text: string): number {
   const [, letter, accidental, octave, detune] = match;
   const natural = NATURAL_STEPS[NATURALS.indexOf(letter.toUpperCase())];
   const adjustment = accidental === "#" || accidental === "♯" ? 1 : accidental ? -1 : 0;
-  return pitchToHz({
+  const hz = pitchToHz({
     midi: (Number(octave) + 1) * 12 + natural + adjustment,
     cents: Number(detune ?? 0),
   });
+  return hz > 0 ? hz : NaN;
 }

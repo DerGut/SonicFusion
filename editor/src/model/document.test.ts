@@ -15,6 +15,7 @@ import {
   parseDocument,
   removeMixInput,
   removeNodes,
+  setFrequencyMode,
   studioDocument,
   toGraph,
   wouldCycle,
@@ -28,6 +29,15 @@ describe("document", () => {
     const doc = studio();
     expect(toGraph(doc)).toEqual(studioPatch);
     expect(parseDocument(JSON.stringify(doc))).toEqual(doc);
+  });
+
+  it("round-trips a frequency display override only in the editor document", () => {
+    const doc = studio();
+    const changed = setFrequencyMode(doc, "osc_a", "hz");
+    expect(toGraph(changed)).toEqual(toGraph(doc));
+    const restored = parseDocument(JSON.stringify(changed));
+    expect(restored.nodes.find((node) => node.id === "osc_a")?.frequencyMode).toBe("hz");
+    expect(setFrequencyMode(restored, "osc_a")).toEqual(doc);
   });
 
   it("adds nodes with catalog defaults and unique ids", () => {

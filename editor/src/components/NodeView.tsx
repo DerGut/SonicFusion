@@ -1,18 +1,17 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { memo, useState } from "react";
+import { memo } from "react";
 
 import type { PortDescriptor } from "../api/types";
 import { wireId } from "../model/document";
-import { noteName, pitchFromHz } from "../model/pitch";
 import { formatHz } from "../model/signal";
 import { IO_PORT_TOP, type SfNode, pickUpWire, rowPortTop } from "./flow";
 import { KindIcon } from "./icons";
 import { OutputMeter } from "./OutputMeter";
-import { FrequencyModeSelect, ParamControl, type FrequencyMode } from "./ParamControl";
+import { ParamControl } from "./ParamControl";
+import { FrequencyControl } from "./FrequencyControl";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const { node, descriptor, ports, sources, issues, actions, session } = data;
-  const [frequencyMode, setFrequencyMode] = useState<FrequencyMode>("hz");
   const errors = issues.filter((issue) => issue.severity === "error");
   const warning = issues.find((issue) => issue.severity === "warning");
   const portIssue = (port: string) => errors.find((issue) => issue.port === port)?.message;
@@ -71,36 +70,34 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
-    const isCutoff = param.name === "cutoff_hz";
-    const isOscillatorFrequency = param.name === "frequency_hz";
+    const isCutoff = param.frequency === "cutoff";
     const modulated = isCutoff && control && sources[control.name];
     if (modulated) {
       const { base_hz, depth_hz } = session.cutoff_modulation;
-      const low = pitchFromHz(base_hz - depth_hz);
-      const high = pitchFromHz(base_hz + depth_hz);
-      const readout = frequencyMode === "note" && low && high
-        ? noteName(low.midi) + " – " + noteName(high.midi)
-        : formatHz(base_hz) + " ± " + Math.round(depth_hz) + " Hz";
+      const readout = formatHz(base_hz) + " ± " + Math.round(depth_hz) + " Hz";
       rows.push(
         <div key={param.name} className="param modulated">
           <div className="param-top">
             <span>{param.label}</span>
-            <FrequencyModeSelect label={param.label} mode={frequencyMode} onChange={setFrequencyMode} />
+            <span className="value">{readout}</span>
           </div>
-          <span className="value">{readout}</span>
           <p className="param-note">from {sources[control.name]} · fixed engine mapping</p>
         </div>,
       );
     } else {
-      rows.push(
-        <ParamControl key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
-          value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
-          frequency={isCutoff || isOscillatorFrequency
-            ? { mode: frequencyMode, onModeChange: setFrequencyMode, semitones: isOscillatorFrequency }
-            : undefined}
-          onBeginContinuous={actions.beginContinuous}
-          onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
-      );
+      const props = {
+        id: `${node.id}-${param.name}`,
+        descriptor: param,
+        value: Number(node.params[param.name]),
+        invalid: paramIssue(param.name),
+        onBeginContinuous: actions.beginContinuous,
+        onChange: (value: number, continuous: boolean) => actions.setParam(node.id, param.name, value, continuous),
+      };
+      rows.push(param.frequency ? (
+        <FrequencyControl key={param.name} {...props} sampleRate={session.sample_rate_hz}
+          feedsControl={data.feedsControl} override={node.frequencyMode}
+          onOverride={(mode) => actions.setFrequencyMode(node.id, mode)} />
+      ) : <ParamControl key={param.name} {...props} />);
     }
     if (isCutoff && control) handles.push(inputHandle(control, rowPortTop(index)));
   });

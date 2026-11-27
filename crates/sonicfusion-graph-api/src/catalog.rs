@@ -7,7 +7,7 @@ use crate::{NodeKind, Signal};
 /// limits, including session-dependent ones such as Nyquist, are enforced by
 /// [`crate::validate`].
 pub fn catalog() -> Vec<NodeDescriptor> {
-    let hz = |name: &str, label: &str, default: f64, min: f64| ParamDescriptor {
+    let hz = |name: &str, label: &str, default: f64, min: f64, frequency| ParamDescriptor {
         name: name.into(),
         label: label.into(),
         unit: Some("Hz".into()),
@@ -15,6 +15,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
         max: 20_000.0,
         default,
         scale: Scale::Log,
+        frequency: Some(frequency),
     };
     let ratio = |name: &str, label: &str, default: f64| ParamDescriptor {
         name: name.into(),
@@ -24,6 +25,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
         max: 1.0,
         default,
         scale: Scale::Linear,
+        frequency: None,
     };
     let audio_in = |name: &str, label: &str| PortDescriptor {
         name: name.into(),
@@ -40,7 +42,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             inputs: Vec::new(),
             variadic_input: None,
             has_output: true,
-            params: vec![hz("frequency_hz", "Frequency", 220.0, 0.01)],
+            params: vec![hz(
+                "frequency_hz",
+                "Frequency",
+                220.0,
+                0.01,
+                FrequencyParam::Pitch,
+            )],
         },
         NodeDescriptor {
             kind: "square".into(),
@@ -51,7 +59,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             variadic_input: None,
             has_output: true,
             params: vec![
-                hz("frequency_hz", "Frequency", 110.0, 0.01),
+                hz(
+                    "frequency_hz",
+                    "Frequency",
+                    110.0,
+                    0.01,
+                    FrequencyParam::Pitch,
+                ),
                 ratio("pulse_width", "Pulse width", 0.5),
             ],
         },
@@ -63,7 +77,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             inputs: Vec::new(),
             variadic_input: None,
             has_output: true,
-            params: vec![hz("frequency_hz", "Frequency", 220.0, 0.01)],
+            params: vec![hz(
+                "frequency_hz",
+                "Frequency",
+                220.0,
+                0.01,
+                FrequencyParam::Pitch,
+            )],
         },
         NodeDescriptor {
             kind: "low_pass".into(),
@@ -81,7 +101,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             ],
             variadic_input: None,
             has_output: true,
-            params: vec![hz("cutoff_hz", "Cutoff", 1_200.0, 20.0)],
+            params: vec![hz(
+                "cutoff_hz",
+                "Cutoff",
+                1_200.0,
+                20.0,
+                FrequencyParam::Cutoff,
+            )],
         },
         NodeDescriptor {
             kind: "gain".into(),
@@ -208,6 +234,16 @@ pub struct ParamDescriptor {
     pub max: f64,
     pub default: f64,
     pub scale: Scale,
+    /// A frequency that can be entered as a musical pitch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency: Option<FrequencyParam>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrequencyParam {
+    Pitch,
+    Cutoff,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

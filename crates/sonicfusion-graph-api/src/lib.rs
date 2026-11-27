@@ -15,8 +15,8 @@ mod status;
 mod validate;
 
 pub use catalog::{
-    Category, NodeDescriptor, ParamDescriptor, PortDescriptor, Scale, VariadicInput, catalog,
-    default_kind,
+    Category, FrequencyParam, NodeDescriptor, ParamDescriptor, PortDescriptor, Scale,
+    VariadicInput, catalog, default_kind,
 };
 pub use spec::{
     GRAPH_VERSION, GraphSpec, InputPort, NodeId, NodeKind, NodeSpec, PortRef, Signal, Wire,
