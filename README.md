@@ -55,20 +55,58 @@ The callback fills whatever buffer the host requests, using silence only where
 ready audio runs out. On stop, the example reports frames admitted to the queue,
 graph frames consumed, and device frames submitted (including inserted silence).
 These are not measurements of what has already reached the listener. Stopping
-discards any queued audio; this example does not reload or replace a circuit.
+discards any queued audio; `live_play` does not reload or replace a circuit.
+
+### Live-editing a running session
+
+```sh
+cargo run --locked --features audio-device --example live_runtime
+# Or start from a file instead of the quiet 220 Hz tone:
+cargo run --locked --features audio-device --example live_runtime -- examples/graphs/two-tone.sf
+```
+
+`live_runtime` uses the same 48 kHz, 1,024-frame batches, default-device format
+requirements, and bounded queue as `live_play`. Open an editor while it runs,
+save a complete graph such as `sine(440) -> gain(0.08) -> out` to `edit.sf`, and
+type `load edit.sf` in the running example's terminal. Paths are relative to the
+example's working directory and must refer to regular files, not pipes or
+devices. File reads run on the input thread, so a stalled read can delay terminal
+commands. Ctrl-C still stops playback.
+`load` reads the file only on command and keeps the same device session open.
+Each submission gets a revision number. If two edits are already in flight,
+wait for one to finish and retry.
+
+After hearing the 440 Hz tone, save `sine(24000) -> out` and run `load edit.sf`
+again. The edit is rejected at Nyquist and the tone continues. Then save
+`sine(330) -> gain(0.08) -> out`, reload, and listen for the lower tone. A file
+read error also leaves the current graph alone.
+
+Use `quit`, EOF, or Ctrl-C to stop. Ctrl-C does not require another terminal
+input line. A stdin read error stops playback and exits with an error. On a
+normal stop, the example discards queued audio and reports prefilled and
+admitted graph frames, plus the callback's submitted frames split into graph
+audio and starvation silence. These are counts, not audible positions.
+
+There is no live recording in this example; use the preview command for
+offline WAV output. The hardware-free `runtime_end_to_end` test writes and
+reads back a temporary bounded WAV from its fake output's admitted frames.
 
 ### Replacing a circuit from Rust
 
 Use `runtime.control().submit_replacement(dsl)` from a Tokio runtime to submit a
 complete live circuit without reopening the device. Preparation runs on Tokio's
 blocking pool with the session's existing sample rate and batch size. The returned
-request has a revision and reports events via `next_event().await`. A valid request
-can supersede the one pending replacement; invalid requests do not displace it.
+request has a session-local revision and reports events via `next_event().await`.
+`Accepted` means preparation passed and the edit entered the pending slot, not
+that it is active. A valid request can supersede the one pending replacement;
+invalid requests do not displace it. Future UI or API adapters can use this same
+control handle and feedback without changing the worker or callback.
 
 The producer reports `Scheduled { frame }` when it selects the next root window
 and `Applied { frame }` once the new stream is installed. The frame is an absolute
 graph frame, not a playback timestamp: previously queued audio is left in order,
 and the new stream may not have produced audio yet. The old window (including any
-retained remainder) finishes first. A rejected replacement keeps the old circuit;
-a later stream or output failure stops the run. New processors start with fresh
-state. Clicks and discarded old filter tails are possible; there is no crossfade.
+retained remainder) finishes first. Starvation silence can add device time without
+advancing graph frames. A rejected replacement keeps the old circuit; a later
+stream or output failure stops the run. New processors start with fresh state.
+Clicks and discarded old filter tails are possible; there is no crossfade.
