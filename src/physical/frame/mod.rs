@@ -5,6 +5,7 @@ mod plan;
 mod sawtooth;
 mod sine;
 mod square;
+mod white_noise;
 
 pub use gain::FrameGainExec;
 pub(crate) use low_pass_filter::validate_constant_cutoff;
@@ -15,6 +16,7 @@ pub use sawtooth::FrameSawToothOscExec;
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
 pub(crate) use square::validate_pulse_width;
+pub use white_noise::FrameWhiteNoiseExec;
 
 /// Frame signals carry finite, unitless bipolar samples in [-1, 1].
 fn validate_sample(sample: f32, frame: u64, source: &str) -> datafusion::error::Result<()> {

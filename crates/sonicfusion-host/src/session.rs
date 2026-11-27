@@ -431,6 +431,71 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn saved_noise_graph_plays_the_same_signal_as_its_probe() {
+        let graph = GraphSpec {
+            version: 1,
+            // These two IDs have the same FNV-1a hash.
+            nodes: vec![
+                node("liquid", NodeKind::Noise {}),
+                node("costarring", NodeKind::Noise {}),
+                node(
+                    "mix",
+                    NodeKind::Mix {
+                        weights: vec![0.5, 0.5],
+                    },
+                ),
+                node("out", NodeKind::Output {}),
+            ],
+            wires: vec![
+                wire("liquid", "mix", "in.0"),
+                wire("liquid", "mix", "in.1"),
+                wire("mix", "out", "in"),
+            ],
+        };
+        let reopened: GraphSpec =
+            serde_json::from_str(&serde_json::to_string(&graph).unwrap()).unwrap();
+        assert_eq!(reopened, graph);
+        let engine = Engine::with_settings(48_000, 64).unwrap();
+        let mut reordered = reopened.clone();
+        reordered.nodes.reverse();
+        assert_eq!(
+            engine.lower(&reopened).unwrap(),
+            engine.lower(&reordered).unwrap()
+        );
+        let (sender, mut chunks) = mpsc::unbounded_channel();
+        let session = Session::start_with_output(
+            &engine,
+            &reopened,
+            ChannelOutput {
+                chunks: sender,
+                batch: NonZeroUsize::new(64).unwrap(),
+            },
+        )
+        .unwrap();
+        // Compare live output after two batches with a probe of the source alone.
+        let chunk = timeout(Duration::from_secs(5), async {
+            chunks.recv().await.unwrap();
+            chunks.recv().await.unwrap();
+            chunks.recv().await.unwrap()
+        })
+        .await
+        .unwrap();
+        let start = chunk.frame_range().start;
+        assert_eq!(start, 128);
+        let probe = engine
+            .probe(&reopened, &NodeId::new("liquid"), start, 64)
+            .await
+            .unwrap();
+        assert_eq!(chunk.samples(), probe);
+        let second = engine
+            .probe(&reopened, &NodeId::new("costarring"), start, 64)
+            .await
+            .unwrap();
+        assert_ne!(probe, second);
+        assert_eq!(session.stop().await, SessionExit::Stopped);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn edit_insert_and_reject_without_restarting() {
         let engine = Engine::with_settings(48_000, 64).unwrap();
         let (sender, mut chunks) = mpsc::unbounded_channel();

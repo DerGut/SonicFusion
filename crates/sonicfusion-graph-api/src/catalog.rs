@@ -66,6 +66,16 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             params: vec![hz("frequency_hz", "Frequency", 220.0, 0.01)],
         },
         NodeDescriptor {
+            kind: "noise".into(),
+            label: "Noise".into(),
+            category: Category::Source,
+            signature: "noise()".into(),
+            inputs: Vec::new(),
+            variadic_input: None,
+            has_output: true,
+            params: Vec::new(),
+        },
+        NodeDescriptor {
             kind: "low_pass".into(),
             label: "Low-pass".into(),
             category: Category::Filter,
@@ -142,6 +152,7 @@ pub fn default_kind(kind: &str) -> Option<NodeKind> {
         "sawtooth" => NodeKind::Sawtooth {
             frequency_hz: param("frequency_hz")?,
         },
+        "noise" => NodeKind::Noise {},
         "low_pass" => NodeKind::LowPass {
             cutoff_hz: param("cutoff_hz")?,
         },

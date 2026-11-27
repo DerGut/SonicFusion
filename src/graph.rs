@@ -11,8 +11,8 @@ use crate::{
     ExecutionConfig,
     physical::frame::{
         Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
-        FrameSquareOscExec, low_pass, validate_constant_cutoff, validate_frequency,
-        validate_pulse_width,
+        FrameSquareOscExec, FrameWhiteNoiseExec, low_pass, validate_constant_cutoff,
+        validate_frequency, validate_pulse_width,
     },
 };
 
@@ -32,6 +32,7 @@ pub(crate) enum Node {
     Sine(f64),
     Square(f64, f64),
     Sawtooth(f64),
+    WhiteNoise(Option<u32>),
     Gain(NodeId, f32),
     LowPass(NodeId, PreparedCutoff),
     Mix(Vec<NodeId>, Vec<f32>),
@@ -102,7 +103,7 @@ impl PreparedGraph {
     /// Bind the graph to the execution origin using the settings it was prepared with.
     pub(crate) fn instantiate(self, config: &ExecutionConfig) -> Result<Plan> {
         let mut plans = Vec::<Plan>::with_capacity(self.nodes.len());
-        for node in self.nodes {
+        for (index, node) in self.nodes.into_iter().enumerate() {
             let input = |id: NodeId| plans[id.0].clone();
             let plan: Plan = match node {
                 Node::Sine(hz) => Arc::new(FrameSineOscExec::try_new(config, hz)?),
@@ -110,6 +111,10 @@ impl PreparedGraph {
                     Arc::new(FrameSquareOscExec::try_new(config, hz, width)?)
                 }
                 Node::Sawtooth(hz) => Arc::new(FrameSawToothOscExec::try_new(config, hz)?),
+                Node::WhiteNoise(seed) => Arc::new(FrameWhiteNoiseExec::new(
+                    config,
+                    seed.unwrap_or(index as u32),
+                )),
                 Node::Gain(id, factor) => {
                     Arc::new(FrameGainExec::try_new(config, input(id), factor)?)
                 }

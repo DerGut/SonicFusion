@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDb, formatHz, spectrumDb, triggerIndex } from "./signal";
+import { noteName, pitchFromHz } from "./pitch";
+import { formatDb, formatHz, spectrumDb, strongestPartial, triggerIndex } from "./signal";
 
 const RATE = 48_000;
 const sine = (hz: number, size: number, phase = 0) =>
@@ -16,6 +17,27 @@ describe("signal helpers", () => {
     expect(spectrum[peak]).toBeGreaterThan(-1);
     expect(spectrum[peak]).toBeLessThan(0.5);
     expect(spectrum[400]).toBeLessThan(-60);
+  });
+
+  it.each([[110, "A2"], [220, "A3"], [440, "A4"]])("estimates %i Hz between FFT bins as %s", (hz, name) => {
+    const found = strongestPartial(spectrumDb(sine(hz, 2048)), RATE);
+    expect(found).not.toBeNull();
+    expect(found!.canNamePitch).toBe(true);
+    expect(Math.abs(found!.hz - hz)).toBeLessThan(0.5);
+    expect(noteName(pitchFromHz(found!.hz)!.midi)).toBe(name);
+  });
+
+  it.each([27.5, 32.703])("does not name a bass pitch unresolved by the FFT at %f Hz", (hz) => {
+    expect(strongestPartial(spectrumDb(sine(hz, 2048)), RATE)).toEqual({
+      hz: RATE / 2048,
+      canNamePitch: false,
+    });
+  });
+
+  it("has no strongest partial for silence or a steady DC value", () => {
+    for (const value of [0, 0.25]) {
+      expect(strongestPartial(spectrumDb(Array<number>(2048).fill(value)), RATE)).toBeNull();
+    }
   });
 
   it("triggers on the first rising zero crossing", () => {
