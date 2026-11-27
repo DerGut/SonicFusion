@@ -1,0 +1,11 @@
+syntax = "proto3";
+package sonicfusion.spike.v1;
+
+// Out: one required fp32 sample per frame, at the session's rate and origin.
+message Sine {
+  optional double frequency_hz = 1;
+}
+
+// Inputs: [audio, normalized cutoff]. Uses the DSL v1 cutoff mapping.
+// Out: the filtered mono audio, one sample per frame.
+message NormalizedLowPass {}

@@ -4,15 +4,11 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use datafusion::physical_plan::{ExecutionPlan, limit::GlobalLimitExec};
+use datafusion::physical_plan::limit::GlobalLimitExec;
 
 use crate::{
     ExecutionConfig, RenderConfig,
-    physical::frame::{
-        Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
-        FrameSquareOscExec, low_pass, validate_constant_cutoff, validate_frequency,
-        validate_pulse_width,
-    },
+    graph::{GraphBuilder, Node, NodeId, Plan, PreparedCutoff, PreparedGraph},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -26,8 +22,6 @@ pub enum DslError {
     #[error("failed to construct graph: {0}")]
     Plan(#[from] datafusion::error::DataFusionError),
 }
-
-type Plan = Arc<dyn ExecutionPlan>;
 
 #[derive(Debug, Clone, PartialEq)]
 enum TokenKind {
@@ -76,9 +70,9 @@ struct Stage {
 /// `out`. Exactly one statement must end in `out`. Bindings are available to
 /// subsequent statements. `out` adds the configured finite frame limit.
 pub fn build_plan(source: &str, config: &RenderConfig) -> Result<Plan, DslError> {
-    let graph = prepare_graph(source, config.as_ref())?;
+    let (graph, out_at) = prepare_with_output_location(source, config.as_ref())?;
     let limit = usize::try_from(config.frame_count())
-        .map_err(|_| error(source, graph.out_at, "frame_count does not fit usize"))?;
+        .map_err(|_| error(source, out_at, "frame_count does not fit usize"))?;
     let root = graph.instantiate(config.as_ref())?;
     Ok(Arc::new(GlobalLimitExec::new(root, 0, Some(limit))))
 }
@@ -89,78 +83,20 @@ pub fn build_live_plan(source: &str, config: &ExecutionConfig) -> Result<Plan, D
     Ok(prepare_graph(source, config)?.instantiate(config)?)
 }
 
-#[derive(Clone, Copy, Debug)]
-struct NodeId(usize);
-
-#[derive(Debug)]
-enum PreparedCutoff {
-    ConstantHz(f64),
-    Modulated(NodeId),
-}
-
-#[derive(Debug)]
-enum Node {
-    Sine(f64),
-    Square(f64, f64),
-    Sawtooth(f64),
-    Gain(NodeId, f32),
-    LowPass(NodeId, PreparedCutoff),
-    Mix(Vec<NodeId>, Vec<f32>),
-}
-
-/// Resolved DSL graph. All nodes share the mono schema and one partition;
-/// inputs point only to earlier nodes. The origin is not part of preparation.
-#[derive(Debug)]
-pub(crate) struct PreparedGraph {
-    nodes: Vec<Node>,
-    root: NodeId,
-    out_at: usize,
-}
-
-impl PreparedGraph {
-    /// `config` must use the same session settings as preparation.
-    pub(crate) fn instantiate(self, config: &ExecutionConfig) -> datafusion::error::Result<Plan> {
-        let mut plans = Vec::<Plan>::with_capacity(self.nodes.len());
-        for node in self.nodes {
-            let input = |id: NodeId| plans[id.0].clone();
-            let plan: Plan = match node {
-                Node::Sine(hz) => Arc::new(FrameSineOscExec::try_new(config, hz)?),
-                Node::Square(hz, width) => {
-                    Arc::new(FrameSquareOscExec::try_new(config, hz, width)?)
-                }
-                Node::Sawtooth(hz) => Arc::new(FrameSawToothOscExec::try_new(config, hz)?),
-                Node::Gain(id, factor) => {
-                    Arc::new(FrameGainExec::try_new(config, input(id), factor)?)
-                }
-                Node::LowPass(id, cutoff) => {
-                    let cutoff = match cutoff {
-                        PreparedCutoff::ConstantHz(hz) => Cutoff::ConstantHz(hz),
-                        PreparedCutoff::Modulated(id) => Cutoff::Modulated {
-                            cutoff: FramePlan::try_from_plan(config, input(id))?,
-                        },
-                    };
-                    low_pass(config, FramePlan::try_from_plan(config, input(id))?, cutoff)?
-                        .into_plan()
-                }
-                Node::Mix(ids, gains) => Arc::new(FrameMixExec::try_new(
-                    config,
-                    ids.into_iter().map(input).collect(),
-                    gains,
-                )?),
-            };
-            plans.push(plan);
-        }
-        Ok(plans.swap_remove(self.root.0))
-    }
-}
-
 pub(crate) fn prepare_graph(
     source: &str,
     config: &ExecutionConfig,
 ) -> Result<PreparedGraph, DslError> {
+    prepare_with_output_location(source, config).map(|(graph, _)| graph)
+}
+
+fn prepare_with_output_location(
+    source: &str,
+    config: &ExecutionConfig,
+) -> Result<(PreparedGraph, usize), DslError> {
     let tokens = lex(source)?;
     let statements = Parser::new(source, tokens).parse()?;
-    let mut nodes = Vec::new();
+    let mut graph = GraphBuilder::new(config);
     let mut bindings = HashMap::new();
     let mut output = None;
 
@@ -170,11 +106,8 @@ pub(crate) fn prepare_graph(
         for (index, stage) in stages.into_iter().enumerate() {
             match stage.kind {
                 StageKind::Call(name, args) => {
-                    let id = NodeId(nodes.len());
-                    nodes.push(prepare_node(
-                        source, stage.at, config, &bindings, current, &name, &args,
-                    )?);
-                    current = Some(id);
+                    let node = prepare_node(source, stage.at, &bindings, current, &name, &args)?;
+                    current = Some(graph.add(node)?);
                 }
                 StageKind::Ref(name) if index == 0 => {
                     current = Some(reference(source, stage.at, &bindings, &name)?);
@@ -222,17 +155,12 @@ pub(crate) fn prepare_graph(
 
     let (root, out_at) =
         output.ok_or_else(|| error(source, source.len(), "graph requires one out"))?;
-    Ok(PreparedGraph {
-        nodes,
-        root,
-        out_at,
-    })
+    Ok((graph.finish(root), out_at))
 }
 
 fn prepare_node(
     source: &str,
     at: usize,
-    config: &ExecutionConfig,
     bindings: &HashMap<String, NodeId>,
     incoming: Option<NodeId>,
     name: &str,
@@ -247,13 +175,11 @@ fn prepare_node(
             let numbers =
                 numeric_args(source, at, name, args, if name == "square" { 2 } else { 1 })?;
             let hz = numbers[0];
-            validate_frequency(hz, config.sample_rate_hz(), "frequency_hz")?;
             if name == "sine" {
                 Ok(Node::Sine(hz))
             } else if name == "sawtooth" {
                 Ok(Node::Sawtooth(hz))
             } else {
-                validate_pulse_width(numbers[1])?;
                 Ok(Node::Square(hz, numbers[1]))
             }
         }
@@ -265,7 +191,7 @@ fn prepare_node(
             ))
         }
         "lpf" => {
-            let (input, cutoff) = lpf_args(source, at, config, bindings, incoming, args)?;
+            let (input, cutoff) = lpf_args(source, at, bindings, incoming, args)?;
             Ok(Node::LowPass(input, cutoff))
         }
         "mix" => {
@@ -332,7 +258,6 @@ fn unary_args(
 fn lpf_args(
     source: &str,
     at: usize,
-    config: &ExecutionConfig,
     bindings: &HashMap<String, NodeId>,
     incoming: Option<NodeId>,
     args: &[Arg],
@@ -351,10 +276,7 @@ fn lpf_args(
         }
     };
     let cutoff = match cutoff_arg {
-        Arg::Number(hz) if hz.is_finite() => {
-            validate_constant_cutoff(*hz, config.sample_rate_hz())?;
-            PreparedCutoff::ConstantHz(*hz)
-        }
+        Arg::Number(hz) if hz.is_finite() => PreparedCutoff::ConstantHz(*hz),
         Arg::Ref(name) => PreparedCutoff::Modulated(reference(source, at, bindings, name)?),
         _ => {
             return Err(error(

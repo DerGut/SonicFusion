@@ -1,0 +1,27 @@
+version { minor_number: 85 }
+relations {
+  root {
+    names: "sample"
+    input {
+      extension_multi {
+        common { direct {} }
+        inputs {
+          extension_leaf {
+            detail {
+              [type.googleapis.com/sonicfusion.spike.v1.Sine] { frequency_hz: 440 }
+            }
+          }
+        }
+        inputs { reference { subtree_ordinal: 1 } }
+        detail { [type.googleapis.com/sonicfusion.spike.v1.NormalizedLowPass] {} }
+      }
+    }
+  }
+}
+relations {
+  rel {
+    extension_leaf {
+      detail { [type.googleapis.com/sonicfusion.spike.v1.Sine] { frequency_hz: 12 } }
+    }
+  }
+}
