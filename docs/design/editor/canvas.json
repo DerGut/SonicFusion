@@ -1,0 +1,20 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-27T10:00:00Z"},
+  "title": "SonicFusion Patch Editor",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "A · Studio graph", "expand": "fill"},
+    "Rack.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "B · Modular rack", "expand": "fill"},
+    "Code.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "title": "C · Code + auto-layout", "expand": "fill"},
+    "Anatomy.dc.html": {"x": 0, "y": 1020, "w": 1440, "h": 1240, "title": "Nodes, ports & wires"},
+    "Studio.dc.html": {"x": 1520, "y": 1020, "w": 1440, "h": 900, "title": "v2 · Studio graph + live meter + probe", "expand": "fill", "is_interactive": true}
+  },
+  "order": ["Main.dc.html", "Rack.dc.html", "Code.dc.html", "Anatomy.dc.html", "Studio.dc.html"],
+  "notes": {
+    "directions": {"x": 0, "y": -300, "text": "Three directions, one patch", "kind": "title1", "maxW": 4480},
+    "deferred-code-view": {"x": 3040, "y": 1020, "w": 440, "text": "Deferred: Graph / Split / Code views (from C)\n\nKeep the idea of editing the patch as text and graph side by side, with live two-way sync and auto-layout by signal depth.\n\nBlocked on a DSL we're comfortable with: modulation syntax, stable node names, and round-tripping layout. Tracked in issue #28; revisit once the plan format (#27) settles."}
+  },
+  "designSystems": []
+}

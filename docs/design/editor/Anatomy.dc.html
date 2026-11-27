@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nodes, ports and wires</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1014}
+a{color:#5EA8F7}a:hover{color:#8EC3FA}
+button{font:inherit;color:inherit}
+input{font:inherit}
+.sf-range{-webkit-appearance:none;appearance:none;display:block;width:100%;height:4px;margin:0;border-radius:2px;background:#2A313B}
+.sf-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:#E7EAEE;border:2px solid #1A1F27;box-shadow:0 0 0 1px #4A5361}
+.sf-range::-moz-range-thumb{width:8px;height:8px;border-radius:50%;background:#E7EAEE;border:2px solid #1A1F27}
+.sf-range:focus-visible,.sf-btn:focus-visible{outline:2px solid #5EA8F7;outline-offset:3px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1240px; box-sizing: border-box; padding: 56px 64px; display: flex; flex-direction: column; gap: 36px; background: #0E1014; color: #E7EAEE; font-family: Inter, system-ui, sans-serif; font-size: 13px;">
+
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <h1 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.01em;">Nodes, ports and wires</h1>
+    <p style="margin: 0; max-width: 760px; font-size: 14px; line-height: 1.5; color: #A0A8B4;">The vocabulary all three directions share. Anything marked <span style="padding: 1px 6px; border-radius: 4px; background: #121A26; box-shadow: 0 0 0 1px #24415F; font-size: 12px; color: #9CC9FA;">Proposed</span> needs engine support first: today parameters are fixed numbers, not signals.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px;">
+
+    <section style="height: 480px; box-sizing: border-box; padding: 24px; border-radius: 14px; background: #13161B; box-shadow: 0 0 0 1px #22272F; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Node anatomy</h2><p style="margin: 0; font-size: 12.5px; color: #A0A8B4;">A modulated low-pass, the richest node in the current set.</p></div>
+      <div style="position: relative; height: 220px; border-radius: 10px; background-color: #101318; background-image: radial-gradient(#22272F 1px, transparent 1.4px); background-size: 24px 24px;">
+        <svg width="576" height="220" viewBox="0 0 576 220" aria-hidden="true" style="position: absolute; left: 0; top: 0;">
+          <path d="M146 77H156" stroke="#8A93A0" stroke-width="1"></path>
+          <path d="M146 116H156" stroke="#8A93A0" stroke-width="1"></path>
+          <path d="M410 43H428" stroke="#8A93A0" stroke-width="1"></path>
+          <path d="M420 77H428" stroke="#8A93A0" stroke-width="1"></path>
+          <path d="M410 116H428" stroke="#8A93A0" stroke-width="1"></path>
+          <path d="M410 164H428" stroke="#8A93A0" stroke-width="1"></path>
+        </svg>
+        <div style="position: absolute; left: 168px; top: 24px; width: 240px; height: 172px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+          <div style="height: 38px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid #262C35;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 5H8C11 5 12 8 15 13"></path></svg>
+            <span style="flex: 1; font-size: 13px; font-weight: 600;">Low-pass</span>
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">lpf</span>
+          </div>
+          <div style="height: 30px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 11px; color: #A0A8B4;"><span>in</span><span>out</span></div>
+          <div style="height: 48px; box-sizing: border-box; padding: 7px 14px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="d-cutoff">Cutoff</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">1.20 kHz</span></div>
+            <input id="d-cutoff" class="sf-range" type="range" min="0" max="100" value="59" style="background: linear-gradient(90deg, #2A313B 0 49%, rgba(94,168,247,0.55) 49% 65%, #2A313B 65% 100%);">
+          </div>
+          <div style="height: 48px; box-sizing: border-box; padding: 7px 14px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #9CC9FA;"><label for="d-depth">Depth from LFO</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px;">±600 Hz</span></div>
+            <input id="d-depth" class="sf-range" type="range" min="0" max="100" value="12" style="background: linear-gradient(90deg, #5EA8F7 0 12%, #2A313B 12% 100%);">
+          </div>
+          <button class="sf-btn" aria-label="Audio input" style="position: absolute; left: -10px; top: 43px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+          <button class="sf-btn" aria-label="Audio output" style="position: absolute; right: -10px; top: 43px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+          <button class="sf-btn" aria-label="Cutoff modulation input" style="position: absolute; left: -10px; top: 82px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center;"><span style="width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #5EA8F7; border: 1.5px solid #5EA8F7; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+        </div>
+        <span style="position: absolute; left: 430px; top: 32px; width: 22px; height: 22px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">1</span>
+        <span style="position: absolute; left: 124px; top: 66px; width: 22px; height: 22px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">2</span>
+        <span style="position: absolute; left: 430px; top: 66px; width: 22px; height: 22px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">3</span>
+        <span style="position: absolute; left: 430px; top: 105px; width: 22px; height: 22px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">4</span>
+        <span style="position: absolute; left: 124px; top: 105px; width: 22px; height: 22px; border-radius: 50%; background: #9CC9FA; color: #0E1014; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">5</span>
+        <span style="position: absolute; left: 430px; top: 153px; width: 22px; height: 22px; border-radius: 50%; background: #9CC9FA; color: #0E1014; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">6</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px;">
+        <div style="display: flex; gap: 10px;"><span style="flex: none; width: 20px; height: 20px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">1</span><span style="font-size: 12px; line-height: 1.45; color: #A0A8B4;"><span style="font-weight: 600; color: #E7EAEE;">Header.</span> Your name for the node plus its engine type. Drag to move.</span></div>
+        <div style="display: flex; gap: 10px;"><span style="flex: none; width: 20px; height: 20px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">4</span><span style="font-size: 12px; line-height: 1.45; color: #A0A8B4;"><span style="font-weight: 600; color: #E7EAEE;">Parameter.</span> Label, value and slider. Drag, scroll, or click the value to type.</span></div>
+        <div style="display: flex; gap: 10px;"><span style="flex: none; width: 20px; height: 20px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">2</span><span style="font-size: 12px; line-height: 1.45; color: #A0A8B4;"><span style="font-weight: 600; color: #E7EAEE;">Audio input.</span> Circle. Takes one wire; a second one replaces it.</span></div>
+        <div style="display: flex; gap: 10px;"><span style="flex: none; width: 20px; height: 20px; border-radius: 50%; background: #9CC9FA; color: #0E1014; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">5</span><span style="font-size: 12px; line-height: 1.45; color: #A0A8B4;"><span style="font-weight: 600; color: #E7EAEE;">Modulation input.</span> Diamond on every parameter, hollow until wired. Proposed.</span></div>
+        <div style="display: flex; gap: 10px;"><span style="flex: none; width: 20px; height: 20px; border-radius: 50%; background: #E7EAEE; color: #0E1014; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">3</span><span style="font-size: 12px; line-height: 1.45; color: #A0A8B4;"><span style="font-weight: 600; color: #E7EAEE;">Audio output.</span> Circle. Feeds any number of inputs.</span></div>
+        <div style="display: flex; gap: 10px;"><span style="flex: none; width: 20px; height: 20px; border-radius: 50%; background: #9CC9FA; color: #0E1014; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">6</span><span style="font-size: 12px; line-height: 1.45; color: #A0A8B4;"><span style="font-weight: 600; color: #E7EAEE;">Depth.</span> Shows up once a parameter is wired: how far the source swings it. Proposed.</span></div>
+      </div>
+    </section>
+
+    <section style="height: 480px; box-sizing: border-box; padding: 24px; border-radius: 14px; background: #13161B; box-shadow: 0 0 0 1px #22272F; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Wires and snapping</h2><p style="margin: 0; font-size: 12.5px; color: #A0A8B4;">Shape and stroke carry the signal type, so colour is never the only cue.</p></div>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;">
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <svg width="100%" height="100" viewBox="0 0 181 100" role="img" aria-label="Audio wire between two circular ports" style="display: block; border-radius: 10px; background: #101318;"><rect x="-6" y="20" width="42" height="32" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><rect x="145" y="48" width="42" height="32" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><path d="M36 36C90 36 91 64 145 64" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-linecap="round"></path><circle cx="36" cy="36" r="5.5" fill="#F2A33A"></circle><circle cx="145" cy="64" r="5.5" fill="#F2A33A"></circle></svg>
+          <span style="font-size: 12.5px; font-weight: 600;">Audio wire</span>
+          <span style="font-size: 11.5px; line-height: 1.45; color: #A0A8B4;">Solid amber, circle to circle. Signal flows left to right.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <svg width="100%" height="100" viewBox="0 0 181 100" role="img" aria-label="Dashed modulation wire ending on a diamond port" style="display: block; border-radius: 10px; background: #101318;"><rect x="-6" y="20" width="42" height="32" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><rect x="145" y="48" width="42" height="32" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><path d="M36 36C90 36 91 64 145 64" stroke="#5EA8F7" stroke-width="2" fill="none" stroke-dasharray="6 4" stroke-linecap="round"></path><circle cx="36" cy="36" r="5.5" fill="#F2A33A"></circle><rect x="140.5" y="59.5" width="9" height="9" fill="#5EA8F7" transform="rotate(45 145 64)"></rect></svg>
+          <span style="font-size: 12.5px; font-weight: 600;">Modulation wire <span style="font-weight: 500; color: #9CC9FA;">· Proposed</span></span>
+          <span style="font-size: 11.5px; line-height: 1.45; color: #A0A8B4;">Dashed blue, always lands on a diamond.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <svg width="100%" height="100" viewBox="0 0 181 100" role="img" aria-label="Wire being dragged, compatible ports highlighted" style="display: block; border-radius: 10px; background: #101318;"><rect x="145" y="14" width="42" height="72" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><circle cx="30" cy="56" r="9" fill="none" stroke="#5EA8F7" stroke-opacity="0.45" stroke-width="3"></circle><path d="M30 56C70 56 80 44 112 44" stroke="#9CC9FA" stroke-width="2" fill="none" stroke-dasharray="1 5" stroke-linecap="round"></path><circle cx="30" cy="56" r="5.5" fill="#F2A33A"></circle><rect x="140.5" y="27.5" width="9" height="9" fill="#101318" stroke="#5EA8F7" stroke-width="1.5" transform="rotate(45 145 32)"></rect><circle cx="145" cy="32" r="11" fill="none" stroke="#5EA8F7" stroke-opacity="0.55" stroke-dasharray="2 3"></circle><rect x="140.5" y="63.5" width="9" height="9" fill="#101318" stroke="#5EA8F7" stroke-width="1.5" transform="rotate(45 145 68)"></rect><circle cx="145" cy="68" r="11" fill="none" stroke="#5EA8F7" stroke-opacity="0.55" stroke-dasharray="2 3"></circle><path d="M112 40L112 54L116 50L119 57L121 56L118 49L123 49Z" fill="#E7EAEE"></path></svg>
+          <span style="font-size: 12.5px; font-weight: 600;">Dragging</span>
+          <span style="font-size: 11.5px; line-height: 1.45; color: #A0A8B4;">Every port that could take the wire gets a ring.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <svg width="100%" height="100" viewBox="0 0 181 100" role="img" aria-label="Wire end snapped onto a port inside a 24 pixel radius" style="display: block; border-radius: 10px; background: #101318;"><rect x="140" y="20" width="47" height="60" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><circle cx="140" cy="50" r="26" fill="none" stroke="#5EA8F7" stroke-opacity="0.35" stroke-dasharray="2 4"></circle><path d="M24 74C80 74 84 50 140 50" stroke="#9CC9FA" stroke-width="2" fill="none" stroke-dasharray="1 5" stroke-linecap="round"></path><circle cx="24" cy="74" r="5.5" fill="#F2A33A"></circle><circle cx="140" cy="50" r="15" fill="rgba(94,168,247,0.14)" stroke="#5EA8F7" stroke-width="1.5"></circle><rect x="134.5" y="44.5" width="11" height="11" fill="#5EA8F7" transform="rotate(45 140 50)"></rect><text x="96" y="20" fill="#A0A8B4" font-family="Inter, sans-serif" font-size="10">24 px</text></svg>
+          <span style="font-size: 12.5px; font-weight: 600;">Snapped</span>
+          <span style="font-size: 11.5px; line-height: 1.45; color: #A0A8B4;">Inside 24 px the end jumps to the port and names it.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <svg width="100%" height="100" viewBox="0 0 181 100" role="img" aria-label="Rejected connection marked with a cross" style="display: block; border-radius: 10px; background: #101318;"><rect x="140" y="20" width="47" height="60" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><path d="M24 34C80 34 84 50 128 50" stroke="#F87171" stroke-width="2" fill="none" stroke-dasharray="1 5" stroke-linecap="round"></path><circle cx="24" cy="34" r="5.5" fill="#F2A33A"></circle><rect x="135.5" y="45.5" width="9" height="9" fill="#101318" stroke="#4A5361" stroke-width="1.5" transform="rotate(45 140 50)"></rect><circle cx="122" cy="50" r="9" fill="#2A1416" stroke="#F87171" stroke-width="1.5"></circle><path d="M118.5 46.5L125.5 53.5M125.5 46.5L118.5 53.5" stroke="#F87171" stroke-width="1.6" stroke-linecap="round"></path></svg>
+          <span style="font-size: 12.5px; font-weight: 600;">Rejected</span>
+          <span style="font-size: 11.5px; line-height: 1.45; color: #A0A8B4;">A wire that would form a cycle is refused before release.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <svg width="100%" height="100" viewBox="0 0 181 100" role="img" aria-label="New wire replacing the old wire on an input" style="display: block; border-radius: 10px; background: #101318;"><rect x="145" y="34" width="42" height="32" rx="6" fill="#1A1F27" stroke="#2B323D"></rect><path d="M24 24C84 24 86 50 145 50" stroke="#5A6573" stroke-width="2" fill="none" stroke-dasharray="4 4" stroke-linecap="round"></path><path d="M24 80C84 80 86 50 145 50" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-dasharray="1 5" stroke-linecap="round"></path><circle cx="24" cy="24" r="5.5" fill="#5A6573"></circle><circle cx="24" cy="80" r="5.5" fill="#F2A33A"></circle><circle cx="145" cy="50" r="13" fill="none" stroke="#F2A33A" stroke-opacity="0.6"></circle><circle cx="145" cy="50" r="5.5" fill="#F2A33A"></circle></svg>
+          <span style="font-size: 12.5px; font-weight: 600;">Replace</span>
+          <span style="font-size: 11.5px; line-height: 1.45; color: #A0A8B4;">Dropping on a used input swaps out the old wire.</span>
+        </div>
+
+      </div>
+    </section>
+
+    <section style="height: 420px; box-sizing: border-box; padding: 24px; border-radius: 14px; background: #13161B; box-shadow: 0 0 0 1px #22272F; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Parameter states</h2><p style="margin: 0; font-size: 12.5px; color: #A0A8B4;">Every parameter row can be in one of these four states.</p></div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;">
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A93A0;">Static</span>
+          <div style="position: relative; height: 96px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D;">
+            <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid #262C35;"><span style="font-size: 12.5px; font-weight: 600;">Osc A</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sine</span></div>
+            <div style="height: 48px; box-sizing: border-box; padding: 8px 14px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="s-static">Frequency</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">220.0 Hz</span></div>
+              <input id="s-static" class="sf-range" type="range" min="0" max="100" value="35" style="background: linear-gradient(90deg, #C4CAD3 0 35%, #2A313B 35% 100%);">
+            </div>
+            <span aria-hidden="true" style="position: absolute; left: -5px; top: 53px; width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #1A1F27; border: 1.5px solid #5A6573;"></span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A93A0;">Typing a value</span>
+          <div style="position: relative; height: 96px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D;">
+            <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid #262C35;"><span style="font-size: 12.5px; font-weight: 600;">Osc A</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sine</span></div>
+            <div style="height: 60px; box-sizing: border-box; padding: 8px 14px 0 16px; display: flex; align-items: center; gap: 10px;">
+              <label for="s-typed" style="font-size: 12px; color: #C9CFD7;">Frequency</label>
+              <input id="s-typed" type="text" value="440" style="flex: 1; min-width: 0; box-sizing: border-box; height: 30px; padding: 0 8px; border-radius: 6px; border: 1px solid #5EA8F7; background: #0F1216; color: #E7EAEE; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; text-align: right;">
+              <span style="font-size: 11px; color: #A0A8B4;">Hz · ↵</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #9CC9FA;">Modulated · Proposed</span>
+          <div style="position: relative; height: 144px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D;">
+            <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid #262C35;"><span style="font-size: 12.5px; font-weight: 600;">Low-pass</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">lpf</span></div>
+            <div style="height: 48px; box-sizing: border-box; padding: 8px 14px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="s-mod">Cutoff</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">0.60 – 1.80 kHz</span></div>
+              <input id="s-mod" class="sf-range" type="range" min="0" max="100" value="59" style="background: linear-gradient(90deg, #2A313B 0 49%, rgba(94,168,247,0.55) 49% 65%, #2A313B 65% 100%);">
+            </div>
+            <div style="height: 48px; box-sizing: border-box; padding: 8px 14px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #9CC9FA;"><label for="s-depth">Depth from LFO</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px;">±600 Hz</span></div>
+              <input id="s-depth" class="sf-range" type="range" min="0" max="100" value="12" style="background: linear-gradient(90deg, #5EA8F7 0 12%, #2A313B 12% 100%);">
+            </div>
+            <span aria-hidden="true" style="position: absolute; left: -5px; top: 53px; width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #5EA8F7;"></span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #FCA5A5;">Rejected edit</span>
+          <div style="position: relative; height: 144px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1.5px #F87171;">
+            <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid #262C35;"><span style="font-size: 12.5px; font-weight: 600;">Osc C</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sawtooth</span></div>
+            <div style="height: 48px; box-sizing: border-box; padding: 8px 14px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="s-bad">Frequency</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #FCA5A5;">24 000 Hz</span></div>
+              <input id="s-bad" class="sf-range" type="range" min="0" max="100" value="100" aria-invalid="true" style="background: linear-gradient(90deg, #F87171 0 100%);">
+            </div>
+            <div style="margin: 6px 10px 0; padding: 7px 9px; border-radius: 6px; background: #2A1416; display: flex; gap: 8px; align-items: flex-start;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#FCA5A5" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="flex: none; margin-top: 1px;"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 4.5V8.5"></path><path d="M8 11V11.2"></path></svg>
+              <span style="font-size: 11.5px; line-height: 1.4; color: #FECACA;">At Nyquist (24 kHz). Not applied; rev 12 keeps playing.</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section style="height: 420px; box-sizing: border-box; padding: 24px; border-radius: 14px; background: #13161B; box-shadow: 0 0 0 1px #22272F; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Creating a node from a wire</h2><p style="margin: 0; font-size: 12.5px; color: #A0A8B4;">Drop a wire on empty canvas: the menu lists only nodes that can take it, and adds the pick already wired.</p></div>
+      <div style="position: relative; height: 300px; border-radius: 10px; background-color: #101318; background-image: radial-gradient(#22272F 1px, transparent 1.4px); background-size: 24px 24px; overflow: hidden;">
+        <div style="position: absolute; left: -12px; top: 40px; width: 142px; height: 96px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D;">
+          <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 24px; border-bottom: 1px solid #262C35;"><span style="font-size: 12.5px; font-weight: 600;">Mix</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">mix</span></div>
+          <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; padding: 0 14px; font-size: 11px; color: #A0A8B4;">out</div>
+          <span aria-hidden="true" style="position: absolute; right: -6px; top: 42px; width: 11px; height: 11px; border-radius: 50%; background: #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span>
+        </div>
+        <svg width="576" height="300" viewBox="0 0 576 300" aria-hidden="true" style="position: absolute; left: 0; top: 0;">
+          <path d="M130 88C192 88 188 40 246 40" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-dasharray="1 5" stroke-linecap="round"></path>
+          <circle cx="246" cy="40" r="5" fill="#101318" stroke="#F2A33A" stroke-width="2"></circle>
+        </svg>
+        <div role="menu" aria-label="Connect Mix output to" style="position: absolute; left: 254px; top: 26px; width: 290px; box-sizing: border-box; border-radius: 12px; background: #161A20; box-shadow: 0 0 0 1px #2B323D, 0 18px 40px rgba(0,0,0,0.55); overflow: hidden;">
+          <div style="padding: 10px 12px 8px; font-size: 12px; font-weight: 600;">Connect <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; color: #F5C68A;">Mix › out</span> to…</div>
+          <div style="padding: 0 10px 8px;"><input type="search" aria-label="Filter nodes" placeholder="Filter" style="width: 100%; box-sizing: border-box; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid #2B323D; background: #0F1216; color: #E7EAEE; font-size: 12px;"></div>
+          <div style="padding: 0 6px 6px; display: flex; flex-direction: column; gap: 2px;">
+            <button class="sf-btn" role="menuitem" style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 7px; background: #22324A; text-align: left;"><span style="flex: 1; font-size: 12.5px; font-weight: 500;">Low-pass</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #C9CFD7;">lpf(cutoff)</span></button>
+            <button class="sf-btn" role="menuitem" style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; text-align: left;"><span style="flex: 1; font-size: 12.5px; font-weight: 500;">Gain</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">gain(factor)</span></button>
+            <button class="sf-btn" role="menuitem" style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; text-align: left;"><span style="flex: 1; font-size: 12.5px; font-weight: 500;">Mix</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">mix(inputs, weights)</span></button>
+            <button class="sf-btn" role="menuitem" style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; text-align: left;"><span style="flex: 1; font-size: 12.5px; font-weight: 500;">Output</span><span style="font-size: 11px; color: #A0A8B4;">replaces current wire</span></button>
+          </div>
+          <div style="padding: 8px 12px; border-top: 1px solid #262C35; font-size: 11px; color: #A0A8B4;">Sources are hidden: they have no audio input.</div>
+        </div>
+      </div>
+      <p style="margin: 0; font-size: 12px; color: #A0A8B4;">Tab or right-click opens the same menu at the cursor, unfiltered.</p>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
