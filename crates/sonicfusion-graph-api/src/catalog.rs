@@ -221,6 +221,19 @@ pub enum Scale {
 mod tests {
     use super::*;
 
+    /// Frontends and mocks read this file; regenerate with
+    /// `UPDATE_FIXTURES=1 cargo test -p sonicfusion-graph-api`.
+    #[test]
+    fn catalog_fixture_is_current() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/catalog.json");
+        let current = serde_json::to_string_pretty(&catalog()).unwrap() + "\n";
+        if std::env::var_os("UPDATE_FIXTURES").is_some() {
+            std::fs::write(path, &current).unwrap();
+        }
+        let checked_in = std::fs::read_to_string(path).unwrap_or_default();
+        assert_eq!(checked_in, current, "run with UPDATE_FIXTURES=1 to refresh {path}");
+    }
+
     #[test]
     fn catalog_matches_node_kinds() {
         for descriptor in catalog() {

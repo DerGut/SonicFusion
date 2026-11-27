@@ -1,0 +1,171 @@
+[
+  {
+    "kind": "sine",
+    "label": "Sine",
+    "category": "source",
+    "signature": "sine(freq)",
+    "inputs": [],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "frequency_hz",
+        "label": "Frequency",
+        "unit": "Hz",
+        "min": 0.01,
+        "max": 20000.0,
+        "default": 220.0,
+        "scale": "log"
+      }
+    ]
+  },
+  {
+    "kind": "square",
+    "label": "Square",
+    "category": "source",
+    "signature": "square(freq, pw)",
+    "inputs": [],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "frequency_hz",
+        "label": "Frequency",
+        "unit": "Hz",
+        "min": 0.01,
+        "max": 20000.0,
+        "default": 110.0,
+        "scale": "log"
+      },
+      {
+        "name": "pulse_width",
+        "label": "Pulse width",
+        "unit": null,
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.5,
+        "scale": "linear"
+      }
+    ]
+  },
+  {
+    "kind": "sawtooth",
+    "label": "Sawtooth",
+    "category": "source",
+    "signature": "sawtooth(freq)",
+    "inputs": [],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "frequency_hz",
+        "label": "Frequency",
+        "unit": "Hz",
+        "min": 0.01,
+        "max": 20000.0,
+        "default": 220.0,
+        "scale": "log"
+      }
+    ]
+  },
+  {
+    "kind": "low_pass",
+    "label": "Low-pass",
+    "category": "filter",
+    "signature": "lpf(cutoff)",
+    "inputs": [
+      {
+        "name": "in",
+        "label": "in",
+        "signal": "audio",
+        "required": true
+      },
+      {
+        "name": "cutoff",
+        "label": "Cutoff",
+        "signal": "control",
+        "required": false
+      }
+    ],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "cutoff_hz",
+        "label": "Cutoff",
+        "unit": "Hz",
+        "min": 20.0,
+        "max": 20000.0,
+        "default": 1200.0,
+        "scale": "log"
+      }
+    ]
+  },
+  {
+    "kind": "gain",
+    "label": "Gain",
+    "category": "utility",
+    "signature": "gain(factor)",
+    "inputs": [
+      {
+        "name": "in",
+        "label": "in",
+        "signal": "audio",
+        "required": true
+      }
+    ],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "factor",
+        "label": "Factor",
+        "unit": null,
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.1,
+        "scale": "linear"
+      }
+    ]
+  },
+  {
+    "kind": "mix",
+    "label": "Mix",
+    "category": "utility",
+    "signature": "mix(inputs, weights)",
+    "inputs": [],
+    "variadic_input": {
+      "prefix": "in",
+      "weight": {
+        "name": "weights",
+        "label": "Weight",
+        "unit": null,
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.5,
+        "scale": "linear"
+      },
+      "min": 1,
+      "default": 2
+    },
+    "has_output": true,
+    "params": []
+  },
+  {
+    "kind": "output",
+    "label": "Output",
+    "category": "output",
+    "signature": "out",
+    "inputs": [
+      {
+        "name": "in",
+        "label": "in",
+        "signal": "audio",
+        "required": true
+      }
+    ],
+    "variadic_input": null,
+    "has_output": false,
+    "params": []
+  }
+]

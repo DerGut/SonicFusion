@@ -132,10 +132,18 @@ impl Session {
 
     /// Wait until playback ends on its own (e.g. a device failure) or is stopped.
     pub async fn wait(&self) -> SessionExit {
+        self.exited().await
+    }
+
+    /// Like [`Session::wait`], but independent of the session's lifetime, so a
+    /// watcher can report device failures while the session is in use.
+    pub fn exited(&self) -> impl Future<Output = SessionExit> + Send + 'static {
         let mut exit = self.exit.clone();
-        match exit.wait_for(Option::is_some).await {
-            Ok(exit) => exit.clone().expect("waited for an exit"),
-            Err(_) => SessionExit::Failed("playback ended without reporting".into()),
+        async move {
+            match exit.wait_for(Option::is_some).await {
+                Ok(exit) => exit.clone().expect("waited for an exit"),
+                Err(_) => SessionExit::Failed("playback ended without reporting".into()),
+            }
         }
     }
 
