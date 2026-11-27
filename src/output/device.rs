@@ -3,7 +3,7 @@
 
 mod bridge;
 
-use std::{future::pending, sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tokio::sync::oneshot;
@@ -13,7 +13,7 @@ use crate::{
     runtime::{RunExit, SynthRuntime},
 };
 
-use self::bridge::{BatchOutput, Channels, Counters};
+use self::bridge::{Channels, Counters};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
@@ -94,7 +94,7 @@ pub async fn play_default_device(runtime: SynthRuntime) -> Result<DevicePlayback
         })?;
 
     let mut prefilled_frames = 0;
-    let result = drive(runtime, &mut output, prefilled, failed, || {
+    let result = drive(runtime.run(&mut output), prefilled, failed, || {
         let queued_frames = control.next_output_frame() - config.start_frame();
         stream.play().map_err(|source| DeviceError::Backend {
             action: "start default audio output",
@@ -130,30 +130,47 @@ fn select_config(
 }
 
 async fn drive(
-    runtime: SynthRuntime,
-    output: &mut BatchOutput,
+    worker: impl Future<Output = Result<RunExit>>,
     prefilled: oneshot::Receiver<()>,
-    failed: oneshot::Receiver<cpal::Error>,
+    mut failed: oneshot::Receiver<cpal::Error>,
     start_device: impl FnOnce() -> std::result::Result<(), DeviceError>,
 ) -> Result<()> {
-    tokio::select! {
-        biased;
-        failure = failed => {
-            let error = match failure {
-                Ok(source) => DeviceError::Backend { action: "play audio", source },
-                Err(_) => DeviceError::CallbackDisconnected,
-            };
-            Err(error.into())
-        }
-        outcome = runtime.run(output) => match outcome? {
+    let worker = async {
+        match worker.await? {
             RunExit::Stopped => Ok(()),
             RunExit::EndOfStream => Err(DeviceError::EndOfStream.into()),
+        }
+    };
+    tokio::pin!(worker);
+    tokio::select! {
+        biased;
+        failure = &mut failed => return Err(callback_error(failure.ok()).into()),
+        outcome = &mut worker => return outcome,
+        ready = prefilled => ready.map_err(|_| DeviceError::CallbackDisconnected)?,
+    }
+
+    // A device failure can arrive during the worker poll that signals prefill,
+    // after select already checked the error channel in that turn.
+    match failed.try_recv() {
+        Ok(source) => return Err(callback_error(Some(source)).into()),
+        Err(oneshot::error::TryRecvError::Closed) => return Err(callback_error(None).into()),
+        Err(oneshot::error::TryRecvError::Empty) => {}
+    }
+    start_device()?;
+    tokio::select! {
+        biased;
+        failure = failed => Err(callback_error(failure.ok()).into()),
+        outcome = worker => outcome,
+    }
+}
+
+fn callback_error(source: Option<cpal::Error>) -> DeviceError {
+    match source {
+        Some(source) => DeviceError::Backend {
+            action: "play audio",
+            source,
         },
-        startup = async {
-            prefilled.await.map_err(|_| DeviceError::CallbackDisconnected)?;
-            start_device()?;
-            pending::<Result<()>>().await
-        } => startup,
+        None => DeviceError::CallbackDisconnected,
     }
 }
 

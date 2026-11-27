@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{cell::Cell, pin::pin, sync::Arc, time::Duration};
 
 use datafusion::physical_plan::limit::GlobalLimitExec;
 
@@ -34,7 +34,13 @@ fn native(
 fn device_format_is_native_float_at_the_session_rate() {
     use cpal::SampleFormat::{F32, I16};
     let stereo = native(2, 48_000, F32);
-    let mono = native(1, 48_000, F32);
+    let mono = cpal::SupportedStreamConfigRange::new(
+        1,
+        44_100,
+        96_000,
+        cpal::SupportedBufferSize::Unknown,
+        F32,
+    );
     let unsuitable = [
         native(1, 48_000, I16),
         native(1, 44_100, F32),
@@ -68,7 +74,7 @@ async fn runtime_prefills_complete_batches_and_can_stop_with_no_more_capacity() 
     let (_errors, failed) = oneshot::channel();
     let result = tokio::time::timeout(
         Duration::from_secs(1),
-        drive(runtime, &mut output, ready, failed, || {
+        drive(runtime.run(&mut output), ready, failed, || {
             let admitted = control.next_output_frame() - config().start_frame();
             assert_eq!(admitted % 4, 0);
             assert!((PREFILL_BATCHES as u64 * 4..=QUEUE_BATCHES as u64 * 4).contains(&admitted));
@@ -87,13 +93,61 @@ async fn runtime_prefills_complete_batches_and_can_stop_with_no_more_capacity() 
 }
 
 #[tokio::test]
+async fn stop_interrupts_capacity_wait_without_another_device_read() {
+    let runtime = live(config());
+    let control = runtime.control();
+    let (mut output, _callback, ready) = bridge::bridge(4, Channels::Mono, Arc::default()).unwrap();
+    let (_errors, failed) = oneshot::channel();
+    let started = Cell::new(false);
+    let mut playback = pin!(drive(runtime.run(&mut output), ready, failed, || {
+        started.set(true);
+        Ok(())
+    }));
+    assert!(futures::poll!(&mut playback).is_pending());
+    assert!(started.get());
+    let full_queue_position = config().start_frame() + QUEUE_BATCHES as u64 * 4;
+    assert_eq!(control.next_output_frame(), full_queue_position);
+    control.stop();
+    tokio::time::timeout(Duration::from_secs(1), playback)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(control.next_output_frame(), full_queue_position);
+}
+
+#[tokio::test]
+async fn startup_failure_is_returned_with_no_device_reads() {
+    let runtime = live(config());
+    let control = runtime.control();
+    let counters = Arc::new(Counters::default());
+    let (mut output, _callback, ready) =
+        bridge::bridge(4, Channels::Mono, Arc::clone(&counters)).unwrap();
+    let (_errors, failed) = oneshot::channel();
+    let error = drive(runtime.run(&mut output), ready, failed, || {
+        assert!(
+            control.next_output_frame() >= config().start_frame() + (PREFILL_BATCHES * 4) as u64
+        );
+        Err(DeviceError::Backend {
+            action: "start default audio output",
+            source: cpal::Error::new(cpal::ErrorKind::DeviceBusy),
+        })
+    })
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error, Error::Device(DeviceError::Backend { action: "start default audio output", source }) if source.kind() == cpal::ErrorKind::DeviceBusy)
+    );
+    assert_eq!(counters.snapshot(0).device_frames_submitted, 0);
+}
+
+#[tokio::test]
 async fn stopping_before_prefill_never_starts_playback() {
     let runtime = live(config());
     let control = runtime.control();
     control.stop();
     let (mut output, _callback, ready) = bridge::bridge(4, Channels::Mono, Arc::default()).unwrap();
     let (_errors, failed) = oneshot::channel();
-    drive(runtime, &mut output, ready, failed, || {
+    drive(runtime.run(&mut output), ready, failed, || {
         panic!("device should not start")
     })
     .await
@@ -108,7 +162,7 @@ async fn async_device_failure_interrupts_a_full_queue() {
     let (errors, failed) = oneshot::channel();
     let err = tokio::time::timeout(
         Duration::from_secs(1),
-        drive(runtime, &mut output, ready, failed, || {
+        drive(runtime.run(&mut output), ready, failed, || {
             errors
                 .send(cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable))
                 .unwrap();
@@ -120,6 +174,33 @@ async fn async_device_failure_interrupts_a_full_queue() {
     .unwrap_err();
     assert!(
         matches!(err, Error::Device(DeviceError::Backend { action: "play audio", source }) if source.kind() == cpal::ErrorKind::DeviceNotAvailable)
+    );
+}
+
+#[tokio::test]
+async fn device_failure_in_the_prefill_poll_prevents_startup() {
+    let (prefilled, ready) = oneshot::channel();
+    let (errors, failed) = oneshot::channel();
+    let worker = async {
+        // Both notifications occur after select first checks the error channel,
+        // during the same worker poll that otherwise lets playback start.
+        prefilled.send(()).unwrap();
+        errors
+            .send(cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable))
+            .unwrap();
+        std::future::pending().await
+    };
+    let error = tokio::time::timeout(
+        Duration::from_secs(1),
+        drive(worker, ready, failed, || {
+            panic!("device should not start after a prefill failure")
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(
+        matches!(error, Error::Device(DeviceError::Backend { action: "play audio", source }) if source.kind() == cpal::ErrorKind::DeviceNotAvailable)
     );
 }
 
@@ -153,7 +234,7 @@ async fn invalid_live_source_leaves_device_paused_and_reports_the_failure() {
         let (mut output, _callback, ready) =
             bridge::bridge(4, Channels::Mono, Arc::default()).unwrap();
         let (_errors, failed) = oneshot::channel();
-        let err = drive(runtime, &mut output, ready, failed, || {
+        let err = drive(runtime.run(&mut output), ready, failed, || {
             panic!("device should not start")
         })
         .await
