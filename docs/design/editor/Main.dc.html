@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Studio graph editor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1014}
+a{color:#5EA8F7}a:hover{color:#8EC3FA}
+button{font:inherit;color:inherit}
+input{font:inherit}
+.sf-range{-webkit-appearance:none;appearance:none;display:block;width:100%;height:4px;margin:0;border-radius:2px;background:#2A313B;cursor:ew-resize}
+.sf-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:#E7EAEE;border:2px solid #1A1F27;box-shadow:0 0 0 1px #4A5361}
+.sf-range::-moz-range-thumb{width:8px;height:8px;border-radius:50%;background:#E7EAEE;border:2px solid #1A1F27}
+.sf-range:focus-visible,.sf-btn:focus-visible{outline:2px solid #5EA8F7;outline-offset:3px}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #0E1014; color: #E7EAEE; font-family: Inter, system-ui, sans-serif; font-size: 13px;">
+
+  <header style="height: 52px; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 0 16px; background: #12151A; border-bottom: 1px solid #22272F;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="#1C2129" stroke="#2B323D"></rect><path d="M4 11C6 5 8 5 10 11S14 17 18 11" stroke="#F2A33A" stroke-width="2" stroke-linecap="round"></path></svg>
+      <span style="font-size: 14px; font-weight: 600;">SonicFusion</span>
+    </div>
+    <div style="width: 1px; height: 20px; background: #2B323D;"></div>
+    <div style="display: flex; align-items: baseline; gap: 8px;">
+      <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">sketch-01.sf</span>
+      <span style="font-size: 12px; color: #A0A8B4;">edited</span>
+    </div>
+    <div style="display: flex; gap: 4px; margin-left: 8px;">
+      <button class="sf-btn" aria-label="Undo" style="width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; justify-content: center; color: #C9CFD7;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L3 6.5L6 9.5"></path><path d="M3 6.5H10C12 6.5 13 8 13 10S12 13.5 10 13.5H8"></path></svg></button>
+      <button class="sf-btn" aria-label="Redo" style="width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; justify-content: center; color: #C9CFD7;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5L13 6.5L10 9.5"></path><path d="M13 6.5H6C4 6.5 3 8 3 10S4 13.5 6 13.5H8"></path></svg></button>
+    </div>
+    <div style="flex: 1;"></div>
+    <div style="display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; border-radius: 16px; background: #15201A; border: 1px solid #23402E; font-size: 12px;">
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #4ADE80;"></span>
+      <span style="font-weight: 600; color: #BBF7D0;">Live</span>
+      <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #D6DBE1;">rev 12 applied</span>
+      <span style="color: #A0A8B4;">48 kHz · 1024-frame batches</span>
+    </div>
+    <button class="sf-btn" style="height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid #2B323D; background: #1A1F27; font-size: 12.5px; font-weight: 500;"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" rx="2" fill="#E7EAEE"></rect></svg>Stop</button>
+    <button class="sf-btn" style="height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 0; background: #F2A33A; color: #1A1205; font-size: 12.5px; font-weight: 600;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2V10"></path><path d="M5 7L8 10L11 7"></path><path d="M3 12V14H13V12"></path></svg>Export .sf</button>
+  </header>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0;">
+
+    <aside aria-label="Node library" style="flex: 1 1 232px; box-sizing: border-box; padding: 16px 14px; background: #13161B; border-right: 1px solid #22272F; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <h2 style="margin: 0; font-size: 13px; font-weight: 600;">Nodes</h2>
+        <span style="font-size: 11.5px; color: #A0A8B4;">drag to canvas</span>
+      </div>
+      <div style="position: relative;">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="position: absolute; left: 11px; top: 13px;"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5L14 14"></path></svg>
+        <input type="search" aria-label="Search nodes" placeholder="Search nodes" style="width: 100%; box-sizing: border-box; height: 40px; padding: 0 44px 0 32px; border-radius: 8px; border: 1px solid #2B323D; background: #0F1216; color: #E7EAEE; font-size: 12.5px;">
+        <span style="position: absolute; right: 8px; top: 10px; height: 20px; padding: 0 6px; border-radius: 4px; border: 1px solid #2B323D; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; line-height: 20px; color: #A0A8B4;">Tab</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h3 style="margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A93A0;">Sources</h3>
+        <button class="sf-btn" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: grab;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#C9CFD7" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 8C3.5 2 5.5 2 8 8S12.5 14 15 8"></path></svg></span>
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500;">Sine</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sine(freq)</span></span>
+        </button>
+        <button class="sf-btn" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: grab;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#C9CFD7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 11H3V5H8V11H13V5H15"></path></svg></span>
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500;">Square</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">square(freq, pw)</span></span>
+        </button>
+        <button class="sf-btn" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: grab;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#C9CFD7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12L7 4V12L13 4V12"></path></svg></span>
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500;">Sawtooth</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sawtooth(freq)</span></span>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h3 style="margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A93A0;">Filters</h3>
+        <button class="sf-btn" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: grab;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#C9CFD7" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 5H8C11 5 12 8 15 13"></path></svg></span>
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500;">Low-pass</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">lpf(cutoff)</span></span>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h3 style="margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A93A0;">Utility</h3>
+        <button class="sf-btn" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: grab;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#C9CFD7" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 13V10"></path><path d="M8 13V6.5"></path><path d="M13 13V3"></path></svg></span>
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500;">Gain</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">gain(factor)</span></span>
+        </button>
+        <button class="sf-btn" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: grab;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#C9CFD7" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 4C6 4 7 8 10 8"></path><path d="M1 12C6 12 7 8 10 8"></path><path d="M10 8H15"></path></svg></span>
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500;">Mix</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">mix(inputs, weights)</span></span>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h3 style="margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A93A0;">Output</h3>
+        <button class="sf-btn" aria-disabled="true" style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: default;">
+          <span style="width: 28px; height: 28px; border-radius: 6px; background: #1C2129; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A93A0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6H5L9 3V13L5 10H2Z"></path><path d="M12 5.5C13 6.5 13 9.5 12 10.5"></path></svg></span>
+          <span style="flex: 1; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12.5px; font-weight: 500; color: #A0A8B4;">Output</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #8A93A0;">out</span></span>
+          <span style="font-size: 10.5px; padding: 2px 6px; border-radius: 4px; background: #1C2129; color: #A0A8B4;">in patch</span>
+        </button>
+      </div>
+
+      <div style="flex: 1;"></div>
+      <p style="margin: 0; font-size: 11.5px; line-height: 1.5; color: #A0A8B4;">Drop a node onto a wire to insert it in the chain. One output per patch.</p>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column;">
+      <div style="position: relative; height: 816px;">
+        <div style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: auto; background-color: #101318; background-image: radial-gradient(#262C35 1px, transparent 1.4px); background-size: 24px 24px;">
+          <div style="position: relative; width: 1180px; height: 780px;">
+
+            <svg width="1180" height="780" viewBox="0 0 1180 780" aria-hidden="true" style="position: absolute; left: 0; top: 0; pointer-events: none;">
+              <path d="M216 88C248 88 240 180 272 180" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-linecap="round"></path>
+              <path d="M216 244C244 244 244 224 272 224" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-linecap="round"></path>
+              <path d="M456 144L512 144" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-linecap="round"></path>
+              <path d="M696 144L752 144" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-linecap="round"></path>
+              <path d="M936 144L992 144" stroke="#F2A33A" stroke-width="2.5" fill="none" stroke-linecap="round"></path>
+              <path d="M456 364C492 364 476 180 512 180" stroke="#5EA8F7" stroke-width="2" fill="none" stroke-dasharray="6 4" stroke-linecap="round"></path>
+            </svg>
+
+            <div style="position: absolute; left: 32px; top: 40px; width: 184px; height: 114px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 8C3.5 2 5.5 2 8 8S12.5 14 15 8"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">Osc A</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sine</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; padding: 0 14px; font-size: 11px; color: #A0A8B4;">out</div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-osca-freq">Frequency</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">220.0 Hz</span></div>
+                <input id="a-osca-freq" class="sf-range" type="range" min="0" max="100" value="35" style="background: linear-gradient(90deg, #C4CAD3 0 35%, #2A313B 35% 100%);">
+              </div>
+              <button class="sf-btn" aria-label="Osc A audio output" style="position: absolute; right: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Osc A frequency modulation input" style="position: absolute; left: -10px; top: 74px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #1A1F27; border: 1.5px solid #5EA8F7; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+            </div>
+
+            <div style="position: absolute; left: 32px; top: 196px; width: 184px; height: 158px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 11H3V5H8V11H13V5H15"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">Osc B</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">square</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; padding: 0 14px; font-size: 11px; color: #A0A8B4;">out</div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-oscb-freq">Frequency</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">110.0 Hz</span></div>
+                <input id="a-oscb-freq" class="sf-range" type="range" min="0" max="100" value="25" style="background: linear-gradient(90deg, #C4CAD3 0 25%, #2A313B 25% 100%);">
+              </div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-oscb-pw">Pulse width</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">0.30</span></div>
+                <input id="a-oscb-pw" class="sf-range" type="range" min="0" max="100" value="30" style="background: linear-gradient(90deg, #C4CAD3 0 30%, #2A313B 30% 100%);">
+              </div>
+              <button class="sf-btn" aria-label="Osc B audio output" style="position: absolute; right: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Osc B frequency modulation input" style="position: absolute; left: -10px; top: 74px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #1A1F27; border: 1.5px solid #5EA8F7; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Osc B pulse width modulation input" style="position: absolute; left: -10px; top: 118px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #1A1F27; border: 1.5px solid #5EA8F7; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+            </div>
+
+            <div style="position: absolute; left: 272px; top: 96px; width: 184px; height: 186px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 4C6 4 7 8 10 8"></path><path d="M1 12C6 12 7 8 10 8"></path><path d="M10 8H15"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">Mix</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">mix</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; padding: 0 14px; font-size: 11px; color: #A0A8B4;">out</div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-mix-w1">Input 1 weight</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">0.60</span></div>
+                <input id="a-mix-w1" class="sf-range" type="range" min="0" max="100" value="60" style="background: linear-gradient(90deg, #C4CAD3 0 60%, #2A313B 60% 100%);">
+              </div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-mix-w2">Input 2 weight</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">0.40</span></div>
+                <input id="a-mix-w2" class="sf-range" type="range" min="0" max="100" value="40" style="background: linear-gradient(90deg, #C4CAD3 0 40%, #2A313B 40% 100%);">
+              </div>
+              <div style="height: 28px; box-sizing: border-box; padding: 0 8px; display: flex; align-items: center;">
+                <button class="sf-btn" style="height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; font-size: 11.5px; color: #A0A8B4;"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 1V9"></path><path d="M1 5H9"></path></svg>Add input</button>
+              </div>
+              <button class="sf-btn" aria-label="Mix audio output" style="position: absolute; right: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Mix input 1" style="position: absolute; left: -10px; top: 74px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Mix input 2" style="position: absolute; left: -10px; top: 118px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+            </div>
+
+            <div style="position: absolute; left: 272px; top: 316px; width: 184px; height: 114px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 8C3.5 2 5.5 2 8 8S12.5 14 15 8"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">LFO</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">sine</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; padding: 0 14px; font-size: 11px; color: #A0A8B4;">out</div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-lfo-freq">Frequency</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">0.50 Hz</span></div>
+                <input id="a-lfo-freq" class="sf-range" type="range" min="0" max="100" value="51" style="background: linear-gradient(90deg, #C4CAD3 0 51%, #2A313B 51% 100%);">
+              </div>
+              <button class="sf-btn" aria-label="LFO output, dragging a new wire" style="position: absolute; right: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: grabbing;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27, 0 0 0 5px rgba(94,168,247,0.35);"></span></button>
+              <button class="sf-btn" aria-label="LFO frequency modulation input, unavailable: would create a cycle" aria-disabled="true" style="position: absolute; left: -10px; top: 74px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: not-allowed;"><span style="width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #1A1F27; border: 1.5px solid #3D4551; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+            </div>
+
+            <div style="position: absolute; left: 512px; top: 96px; width: 184px; height: 158px; box-sizing: border-box; background: #1C222B; border-radius: 10px; box-shadow: 0 0 0 1.5px #DCE1E8, 0 0 0 6px rgba(220,225,232,0.10), 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 5H8C11 5 12 8 15 13"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">Low-pass</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">lpf</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 11px; color: #A0A8B4;"><span>in</span><span>out</span></div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-lpf-cutoff">Cutoff</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">1.20 kHz</span></div>
+                <input id="a-lpf-cutoff" class="sf-range" type="range" min="0" max="100" value="59" style="background: linear-gradient(90deg, #2A313B 0 49%, rgba(94,168,247,0.55) 49% 65%, #2A313B 65% 100%);">
+              </div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #9CC9FA;"><label for="a-lpf-depth">Depth from LFO</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px;">±600 Hz</span></div>
+                <input id="a-lpf-depth" class="sf-range" type="range" min="0" max="100" value="12" style="background: linear-gradient(90deg, #5EA8F7 0 12%, #2A313B 12% 100%);">
+              </div>
+              <button class="sf-btn" aria-label="Low-pass audio input" style="position: absolute; left: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1C222B;"></span></button>
+              <button class="sf-btn" aria-label="Low-pass audio output" style="position: absolute; right: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1C222B;"></span></button>
+              <button class="sf-btn" aria-label="Low-pass cutoff modulation input, connected to LFO" style="position: absolute; left: -10px; top: 74px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 9px; height: 9px; box-sizing: border-box; transform: rotate(45deg); background: #5EA8F7; border: 1.5px solid #5EA8F7; box-shadow: 0 0 0 2px #1C222B;"></span></button>
+            </div>
+
+            <div style="position: absolute; left: 752px; top: 96px; width: 184px; height: 114px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 13V10"></path><path d="M8 13V6.5"></path><path d="M13 13V3"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">Gain</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">gain</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 11px; color: #A0A8B4;"><span>in</span><span>out</span></div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><label for="a-gain-factor">Factor</label><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">0.08 <span style="color: #A0A8B4;">−21.9 dB</span></span></div>
+                <input id="a-gain-factor" class="sf-range" type="range" min="0" max="100" value="8" style="background: linear-gradient(90deg, #C4CAD3 0 8%, #2A313B 8% 100%);">
+              </div>
+              <button class="sf-btn" aria-label="Gain audio input" style="position: absolute; left: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Gain audio output" style="position: absolute; right: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+              <button class="sf-btn" aria-label="Gain factor modulation input, snap target" style="position: absolute; left: -10px; top: 74px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 12px; height: 12px; box-sizing: border-box; transform: rotate(45deg); background: #5EA8F7; border: 1.5px solid #9CC9FA; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+            </div>
+
+            <div style="position: absolute; left: 992px; top: 96px; width: 164px; height: 146px; box-sizing: border-box; background: #1A1F27; border-radius: 10px; box-shadow: 0 0 0 1px #2B323D, 0 8px 20px rgba(0,0,0,0.35);">
+              <div style="height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-bottom: 1px solid #262C35;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A0A8B4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6H5L9 3V13L5 10H2Z"></path><path d="M12 5.5C13 6.5 13 9.5 12 10.5"></path></svg>
+                <span style="flex: 1; font-size: 12.5px; font-weight: 600;">Output</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A0A8B4;">out</span>
+              </div>
+              <div style="height: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 11px; color: #A0A8B4;"><span>in</span><span>mono → 2 ch</span></div>
+              <div style="height: 44px; box-sizing: border-box; padding: 5px 12px 0 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #C9CFD7;"><span>Level</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E7EAEE;">−14.2 dB</span></div>
+                <div role="meter" aria-label="Output level" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-14" style="position: relative; height: 6px; border-radius: 3px; background: #2A313B;"><div style="width: 62%; height: 6px; border-radius: 3px; background: #4ADE80;"></div><div style="position: absolute; left: 70%; top: -2px; width: 2px; height: 10px; background: #D6DBE1;"></div></div>
+              </div>
+              <div style="height: 32px; box-sizing: border-box; display: flex; align-items: center; padding: 0 14px; font-size: 11px; color: #A0A8B4;">Default device · 48 kHz</div>
+              <button class="sf-btn" aria-label="Output audio input" style="position: absolute; left: -10px; top: 38px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: crosshair;"><span style="width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; background: #F2A33A; border: 2px solid #F2A33A; box-shadow: 0 0 0 2px #1A1F27;"></span></button>
+            </div>
+
+            <svg width="1180" height="780" viewBox="0 0 1180 780" aria-hidden="true" style="position: absolute; left: 0; top: 0; pointer-events: none;">
+              <circle cx="32" cy="124" r="12" fill="none" stroke="#5EA8F7" stroke-opacity="0.5" stroke-dasharray="2 3"></circle>
+              <circle cx="32" cy="280" r="12" fill="none" stroke="#5EA8F7" stroke-opacity="0.5" stroke-dasharray="2 3"></circle>
+              <circle cx="32" cy="324" r="12" fill="none" stroke="#5EA8F7" stroke-opacity="0.5" stroke-dasharray="2 3"></circle>
+              <path d="M456 364C720 364 700 180 752 180" stroke="#9CC9FA" stroke-width="2" fill="none" stroke-dasharray="1 5" stroke-linecap="round"></path>
+              <circle cx="752" cy="180" r="18" fill="rgba(94,168,247,0.14)" stroke="#5EA8F7" stroke-width="1.5"></circle>
+            </svg>
+
+            <div style="position: absolute; left: 768px; top: 222px; width: 196px; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; background: #0B0D11; box-shadow: 0 0 0 1px #2F5F92, 0 8px 20px rgba(0,0,0,0.4); display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-size: 12px; font-weight: 600; color: #E7EAEE;">Gain › Factor</span>
+              <span style="font-size: 11.5px; color: #A0A8B4;">Release to modulate · Esc cancels</span>
+            </div>
+
+          </div>
+        </div>
+
+        <div style="position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: #161A20; box-shadow: 0 0 0 1px #2B323D;">
+          <button class="sf-btn" aria-label="Zoom out" style="width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center; color: #C9CFD7;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 6H10"></path></svg></button>
+          <span style="min-width: 44px; text-align: center; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #C9CFD7;">100%</span>
+          <button class="sf-btn" aria-label="Zoom in" style="width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center; color: #C9CFD7;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 6H10"></path><path d="M6 2V10"></path></svg></button>
+          <div style="width: 1px; height: 18px; background: #2B323D; margin: 0 2px;"></div>
+          <button class="sf-btn" aria-label="Fit patch to view" style="width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center; color: #C9CFD7;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6V2H6"></path><path d="M10 2H14V6"></path><path d="M14 10V14H10"></path><path d="M6 14H2V10"></path></svg></button>
+        </div>
+
+        <div aria-label="Minimap" style="position: absolute; right: 16px; bottom: 16px; width: 176px; height: 112px; box-sizing: border-box; padding: 6px; border-radius: 10px; background: #161A20; box-shadow: 0 0 0 1px #2B323D;">
+          <svg width="164" height="100" viewBox="0 0 164 100" aria-hidden="true">
+            <rect x="4" y="5" width="24" height="15" rx="2" fill="#3A424E"></rect>
+            <rect x="4" y="25" width="24" height="21" rx="2" fill="#3A424E"></rect>
+            <rect x="35" y="12" width="24" height="24" rx="2" fill="#3A424E"></rect>
+            <rect x="35" y="41" width="24" height="15" rx="2" fill="#3A424E"></rect>
+            <rect x="67" y="12" width="24" height="21" rx="2" fill="#C4CAD3"></rect>
+            <rect x="98" y="12" width="24" height="15" rx="2" fill="#3A424E"></rect>
+            <rect x="129" y="12" width="21" height="19" rx="2" fill="#3A424E"></rect>
+            <rect x="1" y="1" width="156" height="98" rx="3" fill="none" stroke="#5EA8F7" stroke-opacity="0.6"></rect>
+          </svg>
+        </div>
+      </div>
+
+      <footer style="height: 32px; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 0 16px; background: #12151A; border-top: 1px solid #22272F; font-size: 11.5px; color: #A0A8B4;">
+        <span>7 nodes · 6 wires</span>
+        <span>Low-pass selected</span>
+        <span style="flex: 1;"></span>
+        <span>Drag from a port to connect · Tab adds a node · Space-drag pans</span>
+      </footer>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
