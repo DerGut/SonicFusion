@@ -56,6 +56,16 @@ pub fn low_pass(
     FramePlan::try_from_plan(config, Arc::new(plan))
 }
 
+pub(crate) fn validate_constant_cutoff(cutoff_hz: f64, sample_rate_hz: u32) -> Result<()> {
+    super::validate_frequency(cutoff_hz, sample_rate_hz, "cutoff_hz")?;
+    if cutoff_hz == 0.0 {
+        return Err(DataFusionError::Plan(
+            "cutoff_hz must be greater than 0".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn default_cutoff_mapping(config: &ExecutionConfig) -> (f64, f64) {
     let nyquist_hz = f64::from(config.sample_rate_hz()) / 2.0;
     let base_hz = 1000.0_f64.min(nyquist_hz / 2.0);
@@ -168,12 +178,7 @@ impl FrameLowPassFilterExec {
         cutoff_hz: f64,
     ) -> Result<Self> {
         let config = config.as_ref();
-        super::validate_frequency(cutoff_hz, config.sample_rate_hz(), "cutoff_hz")?;
-        if cutoff_hz == 0.0 {
-            return Err(DataFusionError::Plan(
-                "cutoff_hz must be greater than 0".into(),
-            ));
-        }
+        validate_constant_cutoff(cutoff_hz, config.sample_rate_hz())?;
         Self::validate_input_schema(input.as_ref(), &frame_schema(config))?;
         if input.output_partitioning().partition_count() != 1 {
             return Err(DataFusionError::Plan(

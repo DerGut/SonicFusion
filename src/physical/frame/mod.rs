@@ -7,12 +7,14 @@ mod sine;
 mod square;
 
 pub use gain::FrameGainExec;
+pub(crate) use low_pass_filter::validate_constant_cutoff;
 pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass};
 pub use mix::FrameMixExec;
 pub use plan::FramePlan;
 pub use sawtooth::FrameSawToothOscExec;
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
+pub(crate) use square::validate_pulse_width;
 
 /// Frame signals carry finite, unitless bipolar samples in [-1, 1].
 fn validate_sample(sample: f32, frame: u64, source: &str) -> datafusion::error::Result<()> {
@@ -40,7 +42,7 @@ fn frame_ordering() -> [datafusion::physical_expr::PhysicalSortExpr; 1] {
     )))]
 }
 
-fn validate_frequency(
+pub(crate) fn validate_frequency(
     frequency_hz: f64,
     sample_rate_hz: u32,
     parameter: &str,

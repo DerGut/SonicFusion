@@ -2,7 +2,11 @@ use std::{cell::Cell, pin::pin, sync::Arc, time::Duration};
 
 use datafusion::physical_plan::limit::GlobalLimitExec;
 
-use crate::{Error, ExecutionConfig, dsl::build_live_plan};
+use crate::{
+    Error, ExecutionConfig,
+    dsl::build_live_plan,
+    runtime::{ReplacementEvent, RunExit},
+};
 
 use super::{DeviceError, SynthRuntime, bridge, drive, oneshot, select_config};
 use bridge::{Channels, Counters, PREFILL_BATCHES, QUEUE_BATCHES};
@@ -113,6 +117,44 @@ async fn stop_interrupts_capacity_wait_without_another_device_read() {
         .unwrap()
         .unwrap();
     assert_eq!(control.next_output_frame(), full_queue_position);
+}
+
+#[tokio::test]
+async fn replacement_keeps_the_callback_draining_whole_batches_in_order() {
+    let runtime = live(config());
+    let control = runtime.control();
+    let (mut output, mut callback, _) = bridge::bridge(4, Channels::Mono, Arc::default()).unwrap();
+    let mut worker = pin!(runtime.run(&mut output));
+    assert!(futures::poll!(&mut worker).is_pending());
+    let boundary = config().start_frame() + (QUEUE_BATCHES * 4) as u64;
+    assert_eq!(control.next_output_frame(), boundary);
+
+    let mut edit = control.submit_replacement("square(0, 0) -> gain(0.5) -> out");
+    assert!(matches!(
+        edit.next_event().await,
+        Some(ReplacementEvent::Accepted)
+    ));
+    let mut first = [f32::NAN; 4];
+    // The worker is not being polled at all, but the callback still drains audio.
+    callback.fill(&mut first);
+    assert_eq!(first, [0.25; 4]);
+    assert_eq!(control.next_output_frame(), boundary);
+    tokio::select! {
+        result = &mut worker => panic!("worker exited before cutover: {result:?}"),
+        () = async {
+            assert!(matches!(edit.next_event().await, Some(ReplacementEvent::Scheduled { frame }) if frame == boundary));
+            assert!(matches!(edit.next_event().await, Some(ReplacementEvent::Applied { frame }) if frame == boundary));
+        } => {}
+    }
+
+    // Application doesn't mean the new batch has reached the callback. Old
+    // batches still come first and the runtime never flushes the ring.
+    let mut rest = [f32::NAN; 12];
+    callback.fill(&mut rest);
+    assert_eq!(rest[..8], [0.25; 8]);
+    assert_eq!(rest[8..], [-0.5; 4]);
+    control.stop();
+    assert_eq!(worker.await.unwrap(), RunExit::Stopped);
 }
 
 #[tokio::test]
