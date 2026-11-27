@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ParamDescriptor } from "../api/types";
 import { formatCents, formatPitch, hzToMidi, noteName, parseFrequency, pitchFromHz, pitchToHz } from "../model/pitch";
@@ -146,13 +146,16 @@ export function ParameterRange({ id, min, max, step, position, valueText, onBegi
   onMove: (position: number, event: { altKey: boolean }) => void;
 }) {
   const clamped = Math.min(max, Math.max(min, position));
+  // PROTOTYPE #33: a range input's change event carries no modifier keys.
+  const alt = useRef(false);
   const percent = 100 * ((clamped - min) / (max - min));
   const background = `linear-gradient(90deg, var(--fill) 0 ${percent}%, var(--track) ${percent}% 100%)`;
   return (
     <input id={id} className="range nodrag" type="range" min={min} max={max} step={step} value={clamped}
       style={{ background }} aria-valuetext={valueText}
-      onPointerDown={onBeginContinuous}
-      onKeyDown={(event) => VALUE_KEYS.has(event.key) && onBeginContinuous()}
-      onChange={(event) => onMove(Number(event.target.value), { altKey: (event.nativeEvent as MouseEvent).altKey ?? false })} />
+      onPointerDown={(event) => { alt.current = event.altKey; onBeginContinuous(); }}
+      onPointerMove={(event) => { alt.current = event.altKey; }}
+      onKeyDown={(event) => { alt.current = event.altKey; if (VALUE_KEYS.has(event.key)) onBeginContinuous(); }}
+      onChange={(event) => onMove(Number(event.target.value), { altKey: alt.current })} />
   );
 }
