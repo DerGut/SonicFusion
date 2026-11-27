@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/sonicfusion-graph-api", "crates/sonicfusion-host"]
+exclude = ["editor/src-tauri"]
+
 [package]
 name = "sonicfusion"
 version = "0.1.0"
