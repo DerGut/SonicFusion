@@ -11,7 +11,7 @@ use std::{
 use futures::{StreamExt, stream::FuturesUnordered};
 use sonicfusion::{
     ExecutionConfig,
-    device::{DevicePlaybackStats, play_default_device},
+    device::{DeviceOutput, DevicePlaybackStats},
     dsl::build_live_plan,
     runtime::{ReplacementEvent, ReplacementRequest, RuntimeControl, SynthRuntime},
 };
@@ -35,7 +35,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => read_graph_file(path)?,
         None => "sine(220) -> gain(0.08) -> out".into(),
     };
-    let config = ExecutionConfig::default();
+    let output = DeviceOutput::default_device()?;
+    let config = ExecutionConfig::new(
+        output.sample_rate_hz(),
+        ExecutionConfig::default().batch_frame_capacity(),
+    )?;
     let runtime = SynthRuntime::start(build_live_plan(&graph, &config)?, config)?;
     let control = runtime.control();
 
@@ -46,15 +50,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .name("live-runtime-input".into())
         .spawn(move || read_commands(io::stdin().lock(), input))?;
     eprintln!(
-        "Default device: {} Hz, {} frames per batch. Use `load <path>` to replace the circuit; `quit`, EOF, or Ctrl-C to stop.",
+        "Selected output: {} Hz, {} channel(s), {} frames per processing batch. Use `load <path>` to replace the circuit; `quit`, EOF, or Ctrl-C to stop.",
         config.sample_rate_hz(),
+        output.channels(),
         config.batch_frame_capacity(),
     );
 
     let stats = coordinate_playback(
         &control,
         loads,
-        play_default_device(runtime),
+        output.play(runtime),
         tokio::signal::ctrl_c(),
         log_replacement_event,
     )

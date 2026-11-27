@@ -41,16 +41,21 @@ cargo run --features audio-device --example live_play
 cargo run --features audio-device --example live_play -- examples/graphs/two-tone.sf
 ```
 
-The first command plays a quiet test tone until Ctrl-C. The example uses 48 kHz
-and 1,024-frame processing batches. It requires native `f32` mono or two-channel
-output at that rate on the default device; two-channel output duplicates mono.
-No WAV, resampling, or device switching is involved. Linux builds with this
-feature require ALSA development libraries (e.g. `libasound2-dev` on Debian).
-Offline preview builds without the feature.
+The first command plays a quiet test tone until Ctrl-C. The example selects a
+native `f32` mono or stereo format on the default device before building the
+circuit. It prefers the device's default rate, so a 44.1 kHz-only speaker runs
+at 44.1 kHz. Stereo output duplicates mono. Processing uses 1,024-frame batches
+regardless of the device's callback buffer size. There is no resampling; to use
+a different output, change the system default and restart the example. Linux
+builds with this feature require ALSA development libraries (e.g. `libasound2-dev`
+on Debian). Offline preview builds without the feature.
 
-`device::play_default_device` takes a `SynthRuntime` and starts playback after
-at least two complete batches are queued. The queue holds up to three batches;
-the worker checks for space for an entire batch before polling the graph again.
+In Rust, use `device::DeviceOutput::default_device()` to select an output, build
+at its rate, then call `output.play(runtime)`. For a prebuilt `SynthRuntime`,
+`device::play_default_device` still requires an exact sample-rate match.
+Playback starts after at least two complete batches are queued. The queue holds
+up to three batches; the worker checks for space for an entire batch before
+polling the graph again.
 The callback fills whatever buffer the host requests, using silence only where
 ready audio runs out. On stop, the example reports frames admitted to the queue,
 graph frames consumed, and device frames submitted (including inserted silence).
@@ -65,8 +70,8 @@ cargo run --locked --features audio-device --example live_runtime
 cargo run --locked --features audio-device --example live_runtime -- examples/graphs/two-tone.sf
 ```
 
-`live_runtime` uses the same 48 kHz, 1,024-frame batches, default-device format
-requirements, and bounded queue as `live_play`. Open an editor while it runs,
+`live_runtime` uses the same startup format selection, 1,024-frame batches, and
+bounded queue as `live_play`. Open an editor while it runs,
 save a complete graph such as `sine(440) -> gain(0.08) -> out` to `edit.sf`, and
 type `load edit.sf` in the running example's terminal. Paths are relative to the
 example's working directory and must refer to regular files, not pipes or
@@ -76,10 +81,11 @@ commands. Ctrl-C still stops playback.
 Each submission gets a revision number. If two edits are already in flight,
 wait for one to finish and retry.
 
-After hearing the 440 Hz tone, save `sine(24000) -> out` and run `load edit.sf`
-again. The edit is rejected at Nyquist and the tone continues. Then save
-`sine(330) -> gain(0.08) -> out`, reload, and listen for the lower tone. A file
-read error also leaves the current graph alone.
+After hearing the 440 Hz tone, save `sine(999999) -> out` and run `load edit.sf`
+again. The frequency is above Nyquist (half the session rate), so the edit is
+rejected and the tone continues. Then save `sine(330) -> gain(0.08) -> out`,
+reload, and listen for the lower tone. A file read error also leaves the
+current graph alone.
 
 Use `quit`, EOF, or Ctrl-C to stop. Ctrl-C does not require another terminal
 input line. A stdin read error stops playback and exits with an error. On a
