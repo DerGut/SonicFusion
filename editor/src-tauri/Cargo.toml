@@ -1,0 +1,29 @@
+[package]
+name = "sonicfusion-editor"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Desktop graph editor for SonicFusion"
+
+# Its own workspace keeps Tauri's dependency tree out of the engine's lockfile.
+[workspace]
+
+[lib]
+name = "sonicfusion_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.6", features = [] }
+
+[dependencies]
+# Deliberately no `sonicfusion` dependency: the editor reaches the engine
+# only through the host crate, which accepts complete graphs.
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sonicfusion-graph-api = { path = "../../crates/sonicfusion-graph-api" }
+sonicfusion-host = { path = "../../crates/sonicfusion-host" }
+tauri = { version = "=2.12.7", features = [] }
+tokio = { version = "=1.52.4", features = ["sync"] }
+
+[dev-dependencies]
+tauri = { version = "=2.12.7", features = ["test"] }

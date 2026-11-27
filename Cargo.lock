@@ -3062,6 +3062,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonicfusion-graph-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sonicfusion-host"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "futures",
+ "serde_json",
+ "sonicfusion",
+ "sonicfusion-graph-api",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "sqlparser"
 version = "0.62.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
