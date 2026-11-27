@@ -11,6 +11,10 @@ audio-device = ["dep:cpal", "dep:rtrb", "tokio/signal", "tokio/time"]
 name = "live_play"
 required-features = ["audio-device"]
 
+[[example]]
+name = "live_runtime"
+required-features = ["audio-device"]
+
 [dependencies]
 async-stream = "=0.3.6"
 cpal = { version = "=0.18.2", optional = true }
@@ -21,3 +25,9 @@ rtrb = { version = "=0.4.1", optional = true }
 tempfile = "=3.20.0"
 thiserror = "=2.0.20"
 tokio = { version = "=1.52.4", features = ["macros", "rt-multi-thread", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "=1.52.4", features = ["time"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "=0.2.191"
