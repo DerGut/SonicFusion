@@ -19,7 +19,7 @@ export function KindIcon({ kind, size = 14 }: { kind: NodeKind; size?: number })
   );
 }
 
-type IconName = "undo" | "redo" | "play" | "stop" | "export" | "search" | "close" | "plus" | "minus" | "check" | "alert" | "probe";
+type IconName = "undo" | "redo" | "play" | "stop" | "export" | "search" | "close" | "plus" | "minus" | "check" | "alert" | "probe" | "edit";
 
 const icons: Record<IconName, string[]> = {
   undo: ["M6 3.5L3 6.5L6 9.5", "M3 6.5H10C12 6.5 13 8 13 10S12 13.5 10 13.5H8"],
@@ -28,6 +28,7 @@ const icons: Record<IconName, string[]> = {
   stop: ["M3.5 3.5H12.5V12.5H3.5Z"],
   export: ["M8 2V10", "M5 7L8 10L11 7", "M3 12V14H13V12"],
   search: ["M10.5 10.5L14 14", "M7 2.5A4.5 4.5 0 1 1 7 11.5A4.5 4.5 0 1 1 7 2.5Z"],
+  edit: ["M3 10L10.5 2.5L13.5 5.5L6 13L2 14Z", "M9 4L12 7"],
   close: ["M3.5 3.5L12.5 12.5", "M12.5 3.5L3.5 12.5"],
   plus: ["M8 3V13", "M3 8H13"],
   minus: ["M3 8H13"],
