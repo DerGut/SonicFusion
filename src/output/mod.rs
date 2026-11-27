@@ -1,4 +1,6 @@
 mod chunk;
+#[cfg(feature = "audio-device")]
+pub mod device;
 mod wav;
 mod waveform;
 

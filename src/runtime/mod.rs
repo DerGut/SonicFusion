@@ -59,6 +59,11 @@ impl SynthRuntime {
         })
     }
 
+    /// Settings used to build and validate this execution.
+    pub fn config(&self) -> ExecutionConfig {
+        self.config
+    }
+
     pub fn control(&self) -> RuntimeControl {
         self.control.clone()
     }
