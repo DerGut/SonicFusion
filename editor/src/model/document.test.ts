@@ -61,6 +61,20 @@ describe("document", () => {
     expect(outputProbe.samples.some((sample) => sample > 0.5)).toBe(true);
   });
 
+  it("keeps mock Noise sources distinct when their node IDs hash to the same value", async () => {
+    const graph = toGraph(studio());
+    graph.nodes.push(
+      { id: "liquid", kind: "noise", params: {} },
+      { id: "costarring", kind: "noise", params: {} },
+    );
+    const engine = new MockEngine();
+    const first = await engine.probe(graph, "liquid", 64);
+    const second = await engine.probe(graph, "costarring", 64);
+    expect(first.samples).not.toEqual(second.samples);
+    const reordered = { ...graph, nodes: [...graph.nodes].reverse() };
+    expect((await engine.probe(reordered, "liquid", 64)).samples).toEqual(first.samples);
+  });
+
   it("replaces the wire into a used input", () => {
     const doc = connect(studio(), "osc_b", { node: "mix", port: "in.0" });
     const into = doc.wires.filter((wire) => wire.to.node === "mix" && wire.to.port === "in.0");

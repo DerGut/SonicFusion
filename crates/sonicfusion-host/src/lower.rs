@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Write as _};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write as _,
+};
 
 use sonicfusion_graph_api::{
     GraphIssue, GraphSpec, IssueCode, NodeId, NodeKind, PortRef, input_map,
@@ -54,6 +57,7 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
         .map(|(index, id)| (id, format!("$n{index}")))
         .collect();
     let var = |id: &NodeId| binding[id].as_str();
+    let seeds = noise_seeds(&nodes);
 
     let mut lowered = Lowered {
         source: String::new(),
@@ -68,14 +72,7 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
                 pulse_width,
             } => format!("square({}, {})", num(*frequency_hz), num(*pulse_width)),
             NodeKind::Sawtooth { frequency_hz } => format!("sawtooth({})", num(*frequency_hz)),
-            NodeKind::Noise {} => {
-                // FNV-1a gives the same seed when lowering the whole graph
-                // or only the ancestors of a probe target.
-                let seed = id.0.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
-                    (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
-                });
-                format!("noise({seed})")
-            }
+            NodeKind::Noise {} => format!("noise({})", seeds[id]),
             NodeKind::Gain { factor } => {
                 format!(
                     "gain({}, {})",
@@ -113,6 +110,31 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
     writeln!(lowered.source, "{} -> out", var(root)).unwrap();
     lowered.lines.push(root.clone());
     Ok(lowered)
+}
+
+/// Assign seeds from the whole graph so partial lowering for a probe uses
+/// the same sequence as playback. ID order keeps collision handling stable
+/// when a saved graph lists its nodes in a different order.
+fn noise_seeds<'a>(nodes: &HashMap<&'a NodeId, &NodeKind>) -> HashMap<&'a NodeId, u32> {
+    let mut ids: Vec<_> = nodes
+        .iter()
+        .filter_map(|(&id, &kind)| matches!(kind, NodeKind::Noise {}).then_some(id))
+        .collect();
+    ids.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+
+    let mut used = HashSet::with_capacity(ids.len());
+    ids.into_iter()
+        .map(|id| {
+            // FNV-1a with linear probing for distinct IDs that hash alike.
+            let mut seed = id.0.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+                (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+            });
+            while !used.insert(seed) {
+                seed = seed.wrapping_add(1);
+            }
+            (id, seed)
+        })
+        .collect()
 }
 
 /// Upstream-first order of everything `root` depends on, ending with `root`.

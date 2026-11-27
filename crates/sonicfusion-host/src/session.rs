@@ -434,9 +434,10 @@ mod tests {
     async fn saved_noise_graph_plays_the_same_signal_as_its_probe() {
         let graph = GraphSpec {
             version: 1,
+            // These two IDs have the same FNV-1a hash.
             nodes: vec![
-                node("noise_1", NodeKind::Noise {}),
-                node("noise_2", NodeKind::Noise {}),
+                node("liquid", NodeKind::Noise {}),
+                node("costarring", NodeKind::Noise {}),
                 node(
                     "mix",
                     NodeKind::Mix {
@@ -446,8 +447,8 @@ mod tests {
                 node("out", NodeKind::Output {}),
             ],
             wires: vec![
-                wire("noise_1", "mix", "in.0"),
-                wire("noise_1", "mix", "in.1"),
+                wire("liquid", "mix", "in.0"),
+                wire("liquid", "mix", "in.1"),
                 wire("mix", "out", "in"),
             ],
         };
@@ -455,6 +456,12 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&graph).unwrap()).unwrap();
         assert_eq!(reopened, graph);
         let engine = Engine::with_settings(48_000, 64).unwrap();
+        let mut reordered = reopened.clone();
+        reordered.nodes.reverse();
+        assert_eq!(
+            engine.lower(&reopened).unwrap(),
+            engine.lower(&reordered).unwrap()
+        );
         let (sender, mut chunks) = mpsc::unbounded_channel();
         let session = Session::start_with_output(
             &engine,
@@ -476,12 +483,12 @@ mod tests {
         let start = chunk.frame_range().start;
         assert_eq!(start, 128);
         let probe = engine
-            .probe(&reopened, &NodeId::new("noise_1"), start, 64)
+            .probe(&reopened, &NodeId::new("liquid"), start, 64)
             .await
             .unwrap();
         assert_eq!(chunk.samples(), probe);
         let second = engine
-            .probe(&reopened, &NodeId::new("noise_2"), start, 64)
+            .probe(&reopened, &NodeId::new("costarring"), start, 64)
             .await
             .unwrap();
         assert_ne!(probe, second);
