@@ -183,6 +183,25 @@ fn prepare_node(
                 Ok(Node::Square(hz, numbers[1]))
             }
         }
+        "noise" => {
+            if incoming.is_some() {
+                return Err(bad("noise is a source and takes no input".to_string()));
+            }
+            let seed = match args {
+                [] => None,
+                [Arg::Number(seed)]
+                    if (0.0..=f64::from(u32::MAX)).contains(seed) && seed.fract() == 0.0 =>
+                {
+                    Some(*seed as u32)
+                }
+                _ => {
+                    return Err(bad(
+                        "noise expects no arguments or a UInt32 seed".to_string()
+                    ));
+                }
+            };
+            Ok(Node::WhiteNoise(seed))
+        }
         "gain" => {
             let (input, factor) = unary_args(source, at, bindings, incoming, name, args)?;
             Ok(Node::Gain(
@@ -704,6 +723,18 @@ mod tests {
     fn rejects_invalid_graphs_with_locations() {
         let config = RenderConfig::default();
         for (graph, message) in [
+            (
+                "sine(440) -> noise() -> out",
+                "noise is a source and takes no input",
+            ),
+            (
+                "noise(1.5) -> out",
+                "noise expects no arguments or a UInt32 seed",
+            ),
+            (
+                "noise(4294967296) -> out",
+                "noise expects no arguments or a UInt32 seed",
+            ),
             ("sawtooth() -> out", "sawtooth expects 1 numeric argument"),
             (
                 "sawtooth(440, 0.5) -> out",

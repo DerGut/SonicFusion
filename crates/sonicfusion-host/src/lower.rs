@@ -68,6 +68,14 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
                 pulse_width,
             } => format!("square({}, {})", num(*frequency_hz), num(*pulse_width)),
             NodeKind::Sawtooth { frequency_hz } => format!("sawtooth({})", num(*frequency_hz)),
+            NodeKind::Noise {} => {
+                // FNV-1a gives the same seed when lowering the whole graph
+                // or only the ancestors of a probe target.
+                let seed = id.0.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+                    (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+                });
+                format!("noise({seed})")
+            }
             NodeKind::Gain { factor } => {
                 format!(
                     "gain({}, {})",

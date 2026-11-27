@@ -69,6 +69,16 @@
     ]
   },
   {
+    "kind": "noise",
+    "label": "Noise",
+    "category": "source",
+    "signature": "noise()",
+    "inputs": [],
+    "variadic_input": null,
+    "has_output": true,
+    "params": []
+  },
+  {
     "kind": "low_pass",
     "label": "Low-pass",
     "category": "filter",

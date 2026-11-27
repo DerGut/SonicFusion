@@ -240,6 +240,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
       return from ? signal(from) : new Float32Array(frames);
     };
     const p = (name: string) => Number(node?.params[name] ?? 0);
+    const noiseSeed = node?.kind === "noise" ? noiseSeedFor(id) : 0;
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
       const phase = (p("frequency_hz") * t) % 1;
@@ -252,6 +253,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           break;
         case "sawtooth":
           out[n] = 2 * phase - 1;
+          break;
+        case "noise":
+          out[n] = whiteNoise(start + n, noiseSeed);
           break;
         case "gain":
           out[n] = clamp(input("in")[n] * p("factor"));
@@ -277,6 +281,22 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     return out;
   };
   return Array.from(signal(root));
+}
+
+function noiseSeedFor(id: string): number {
+  let hash = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(id)) {
+    hash = Math.imul(hash ^ byte, 0x01000193);
+  }
+  return hash;
+}
+
+// Hash the absolute position so overlapping mock probes draw the same signal.
+function whiteNoise(frame: number, seed: number): number {
+  let value = frame ^ seed ^ Math.imul(Math.floor(frame / 2 ** 32), 0x9e3779b9);
+  value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
+  value = Math.imul(value ^ (value >>> 15), 0x735a2d97);
+  return ((value ^ (value >>> 15)) >>> 8) / 2 ** 23 - 1;
 }
 
 function clamp(value: number) {
