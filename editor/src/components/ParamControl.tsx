@@ -135,7 +135,7 @@ export function ParamControl({ id, descriptor, label = descriptor.label, value, 
   );
 }
 
-function ParameterRange({ id, min, max, step, position, valueText, onBeginContinuous, onMove }: {
+export function ParameterRange({ id, min, max, step, position, valueText, onBeginContinuous, onMove }: {
   id: string;
   min: number;
   max: number;
@@ -143,7 +143,7 @@ function ParameterRange({ id, min, max, step, position, valueText, onBeginContin
   position: number;
   valueText: string;
   onBeginContinuous: () => void;
-  onMove: (position: number) => void;
+  onMove: (position: number, event: { altKey: boolean }) => void;
 }) {
   const clamped = Math.min(max, Math.max(min, position));
   const percent = 100 * ((clamped - min) / (max - min));
@@ -153,6 +153,6 @@ function ParameterRange({ id, min, max, step, position, valueText, onBeginContin
       style={{ background }} aria-valuetext={valueText}
       onPointerDown={onBeginContinuous}
       onKeyDown={(event) => VALUE_KEYS.has(event.key) && onBeginContinuous()}
-      onChange={(event) => onMove(Number(event.target.value))} />
+      onChange={(event) => onMove(Number(event.target.value), { altKey: (event.nativeEvent as MouseEvent).altKey ?? false })} />
   );
 }

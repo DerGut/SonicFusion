@@ -7,6 +7,8 @@ import { noteName, pitchFromHz } from "../model/pitch";
 import { formatDb, formatHz, spectrumDb, strongestPartial, triggerIndex } from "../model/signal";
 import { describe } from "../state/useEngineSession";
 import { Icon } from "./icons";
+// PROTOTYPE #41
+import { PanelRename, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
@@ -18,7 +20,7 @@ const SCOPE_SECONDS = 0.02;
  * output from the draft at the session's current frame; nothing is tapped
  * from the device stream.
  */
-export function ProbePanel({ client, graph, node, playing, draft, session, onClose }: {
+export function ProbePanel({ client, graph, node, playing, draft, session, onClose, onRename, renameFocus = 0 }: {
   client: EngineClient;
   graph: GraphSpec;
   node: DocNode;
@@ -27,7 +29,11 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
   draft: boolean;
   session: SessionInfo;
   onClose: () => void;
+  onRename: (id: string, name: string) => void;
+  renameFocus?: number;
 }) {
+  const label = useNodeLabel();
+  const nameVariant = useVariant("name");
   const [view, setView] = useState<"scope" | "spectrum">("scope");
   const [probe, setProbe] = useState<ProbeWindow | null>(null);
   /** Why there is no signal: an unfinished branch is normal while editing. */
@@ -74,7 +80,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
     <section className="probe" aria-label="Signal probe">
       <div className="probe-head">
         <Icon name="probe" />
-        <span className="probe-title">{node.id} › out</span>
+        {nameVariant === "C" ? <PanelRename node={node} focusToken={renameFocus} onRename={onRename} /> : <span className="probe-title">{label(node, node.id)} › out</span>}
         <div role="tablist" aria-label="Probe view" className="tabs">
           {(["scope", "spectrum"] as const).map((tab) => (
             <button key={tab} type="button" role="tab" aria-selected={view === tab} aria-controls="probe-plot"

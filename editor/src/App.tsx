@@ -11,6 +11,8 @@ import { Palette } from "./components/Palette";
 import { ProbePanel } from "./components/ProbePanel";
 import { StatusBar } from "./components/StatusBar";
 import { TopBar } from "./components/TopBar";
+// PROTOTYPE #33/#41
+import { DocNodesProvider, PatchUnitToggle, PrototypeSwitcher, RenameFocusProvider, edgeScenario, useNodeLabel } from "./prototype/design-33-41.prototype";
 import {
   type Catalog,
   type EditorDocument,
@@ -92,7 +94,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
   // Sample rate and limits follow the output device each time playback starts.
   const [session, setSession] = useState(initialSession);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
-    doc: loadDocument() ?? studioDocument(studioPatch as GraphSpec),
+    doc: new URLSearchParams(window.location.search).has("scenario") ? edgeScenario(studioDocument(studioPatch as GraphSpec)) : loadDocument() ?? studioDocument(studioPatch as GraphSpec),
     past: [],
     future: [],
   }));
@@ -207,8 +209,13 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
 
   const selectedNode = selected.size === 1 ? doc.nodes.find((node) => selected.has(node.id)) ?? null : null;
   const playing = engine.playback.state === "playing";
+  const nodeLabel = useNodeLabel();
+  const [renameFocus, setRenameFocus] = useState(0);
+  const nodesById = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node])), [doc.nodes]);
 
   return (
+    <DocNodesProvider value={nodesById}>
+    <RenameFocusProvider value={(id) => { setSelected(new Set([id])); setRenameFocus((token) => token + 1); }}>
     <div className="app">
       <TopBar
         name={doc.name}
@@ -232,6 +239,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
         onStop={() => void engine.stop()}
         onApply={() => void engine.apply()}
         onAutoApply={setAutoApply}
+        extra={<PatchUnitToggle />}
         onExport={() => {
           client.exportDsl(graph).then(setExportSource).catch((reason) => setExportSource(`# ${describe(reason)}\n`));
         }}
@@ -290,6 +298,8 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
               draft={engine.dirty}
               session={session}
               onClose={() => setSelected(new Set())}
+              onRename={actions.renameNode}
+              renameFocus={renameFocus}
             />
           )}
         </main>
@@ -298,14 +308,17 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
         nodes={doc.nodes.length}
         wires={doc.wires.length}
         issues={shownIssues}
-        selected={selectedNode?.id ?? null}
+        selected={selectedNode ? nodeLabel(selectedNode, selectedNode.id) : null}
         pending={engine.dirty}
         onFocus={focus}
       />
       {exportSource !== null && (
         <ExportDialog name={doc.name} source={exportSource} onClose={() => setExportSource(null)} />
       )}
+      <PrototypeSwitcher />
     </div>
+    </RenameFocusProvider>
+    </DocNodesProvider>
   );
 }
 

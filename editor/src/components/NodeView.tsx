@@ -7,13 +7,18 @@ import { noteName, pitchFromHz } from "../model/pitch";
 import { formatHz } from "../model/signal";
 import { IO_PORT_TOP, type SfNode, pickUpWire, rowPortTop } from "./flow";
 import { KindIcon } from "./icons";
-import { NodeTitle } from "./NodeTitle";
 import { OutputMeter } from "./OutputMeter";
 import { FrequencyModeSelect, ParamControl, type FrequencyMode } from "./ParamControl";
+// PROTOTYPE #33/#41
+import { PrototypeFrequency, PrototypeTitle, useDocNodes, useModulatedReadout, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const { node, descriptor, ports, sources, issues, actions, session } = data;
   const [frequencyMode, setFrequencyMode] = useState<FrequencyMode>("hz");
+  const pitchVariant = useVariant("pitch");
+  const label = useNodeLabel();
+  const modulatedReadout = useModulatedReadout();
+  const nodes = useDocNodes();
   const errors = issues.filter((issue) => issue.severity === "error");
   const warning = issues.find((issue) => issue.severity === "warning");
   const portIssue = (port: string) => errors.find((issue) => issue.port === port)?.message;
@@ -79,18 +84,25 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       const { base_hz, depth_hz } = session.cutoff_modulation;
       const low = pitchFromHz(base_hz - depth_hz);
       const high = pitchFromHz(base_hz + depth_hz);
-      const readout = frequencyMode === "note" && low && high
+      const readout = modulatedReadout(base_hz, depth_hz, frequencyMode === "note" && low && high
         ? noteName(low.midi) + " – " + noteName(high.midi)
-        : formatHz(base_hz) + " ± " + Math.round(depth_hz) + " Hz";
+        : formatHz(base_hz) + " ± " + Math.round(depth_hz) + " Hz");
       rows.push(
         <div key={param.name} className="param modulated">
           <div className="param-top">
             <span>{param.label}</span>
-            <FrequencyModeSelect label={param.label} mode={frequencyMode} onChange={setFrequencyMode} />
+            {pitchVariant === "A" && <FrequencyModeSelect label={param.label} mode={frequencyMode} onChange={setFrequencyMode} />}
           </div>
           <span className="value">{readout}</span>
-          <p className="param-note">from {sources[control.name]} · fixed engine mapping</p>
+          <p className="param-note">from {label(nodes.get(sources[control.name]), sources[control.name])} · fixed engine mapping</p>
         </div>,
+      );
+    } else if (pitchVariant !== "A" && (isCutoff || isOscillatorFrequency)) {
+      rows.push(
+        <PrototypeFrequency key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
+          value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
+          onBeginContinuous={actions.beginContinuous}
+          onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
       );
     } else {
       rows.push(
@@ -110,8 +122,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     <div className={className}>
       <div className="sf-node-header">
         <KindIcon kind={node.kind} />
-        <NodeTitle node={node} onRename={actions.renameNode} />
-        <span className="sf-node-kind">{descriptor.signature.split("(")[0]}</span>
+        <PrototypeTitle node={node} kind={descriptor.signature.split("(")[0]} onRename={actions.renameNode} />
       </div>
       <div className="sf-node-io">
         <span>{audioIn ? "in" : ""}</span>

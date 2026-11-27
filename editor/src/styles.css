@@ -278,3 +278,33 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .export h2 { margin: 0 0 6px; font-family: var(--mono); font-size: 14px; }
 .export textarea { width: 100%; margin: 12px 0; padding: 10px; border: 1px solid var(--edge); border-radius: 8px; background: #0f1216; font-family: var(--mono); font-size: 12px; line-height: 1.6; resize: vertical; }
 .export-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* PROTOTYPE #33/#41 — throwaway */
+.proto-switcher { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 1000; display: flex; gap: 6px; padding: 6px; border-radius: 999px; background: #f4f0e6; color: #111; box-shadow: 0 6px 24px #0009; font-size: 12px; }
+.proto-group { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 999px; background: #fff; }
+.proto-group button { border: 0; background: #111; color: #fff; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 14px; line-height: 1; }
+.proto-issue { font-family: var(--mono); font-size: 10.5px; color: #6b5a2e; }
+.proto-label { min-width: 210px; text-align: center; }
+.proto-id-chip { flex: none; font-family: var(--mono); font-size: 10px; padding: 1px 5px; border: 1px solid var(--edge); border-radius: 4px; color: var(--muted); max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+.proto-unnamed { font-family: var(--mono); font-weight: 500; color: var(--text-2); }
+.proto-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.1; cursor: default; }
+.proto-stack-name { font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proto-stack-id { font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+.proto-panel-rename { display: flex; align-items: center; gap: 8px; }
+.proto-panel-rename input { width: 180px; height: 22px; padding: 0 6px; border: 1px solid var(--edge); border-radius: 4px; background: #0f1216; color: var(--text); font: inherit; font-size: 12px; font-weight: 600; }
+.proto-panel-rename input:focus { border-color: var(--control); }
+.proto-segmented { display: flex; border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; margin-right: 10px; }
+.proto-segmented button { border: 0; padding: 3px 9px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.proto-segmented button[aria-checked="true"] { background: var(--raised); color: var(--text); }
+.proto-freq { position: relative; }
+.proto-dual { display: flex; align-items: baseline; gap: 6px; }
+.proto-secondary { font-size: 10.5px; color: var(--muted); }
+.proto-popover { position: absolute; top: 48px; left: 6px; right: -40px; z-index: 20; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--edge); border-radius: 8px; background: var(--raised); box-shadow: 0 8px 24px #000a; }
+.proto-pop-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.proto-pop-head button { border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
+.proto-pop-head .spacer { flex: 1; }
+.proto-keys { position: relative; display: flex; height: 54px; }
+.proto-keys .white { flex: 1; border: 1px solid #333; border-radius: 0 0 3px 3px; background: #e9ecef; cursor: pointer; padding: 0; }
+.proto-keys .black { position: absolute; top: 0; width: 12px; height: 32px; border: 0; border-radius: 0 0 2px 2px; background: #111; cursor: pointer; padding: 0; z-index: 1; }
+.proto-keys .on { background: var(--accent, #f2a33a) !important; }
+.proto-keys button:disabled { opacity: .35; cursor: not-allowed; }

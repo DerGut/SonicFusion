@@ -27,6 +27,8 @@ export function TopBar(props: {
   onApply(): void;
   onAutoApply(enabled: boolean): void;
   onExport(): void;
+  /** PROTOTYPE #33 */
+  extra?: React.ReactNode;
 }) {
   const { playback, latest } = props;
   const playing = playback.state === "playing";
@@ -59,6 +61,7 @@ export function TopBar(props: {
         {status.detail && <span className="status-detail">{status.detail}</span>}
         <span className="status-meta">{props.engineLabel} · {props.sampleRateHz / 1000} kHz · {props.batchFrames}-frame blocks</span>
       </div>
+      {props.extra}
       <label className="toggle" title="Apply valid edits automatically while playing. Each apply is a hard cut: filter state restarts.">
         <input type="checkbox" checked={props.autoApply} onChange={(event) => props.onAutoApply(event.target.checked)} />
         Auto-apply
