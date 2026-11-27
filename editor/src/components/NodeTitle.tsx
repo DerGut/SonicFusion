@@ -34,7 +34,7 @@ export function NodeTitle({ node, onRename, inProbe = false }: {
         }} />
     ) : (
       <>
-        <button type="button" className={`node-title-button ${titleClass} nokey`}
+        <button type="button" className={`node-title-button ${titleClass}`}
           title={`${label} · ${inProbe ? "click" : "double-click"} to rename`} aria-label={`Rename node ${label}`}
           onClick={(event) => {
             // Native keyboard activation has no click count. Pointer clicks
@@ -42,6 +42,9 @@ export function NodeTitle({ node, onRename, inProbe = false }: {
             if (inProbe || event.detail === 0) setRenaming(true);
           }}
           onDoubleClick={inProbe ? undefined : () => setRenaming(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+          }}
           ref={(button) => {
             if (button && restoreFocus.current) {
               restoreFocus.current = false;

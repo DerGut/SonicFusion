@@ -241,7 +241,10 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 /* Probe */
 .probe { height: 230px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 12px; background: var(--bar); border-top: 1px solid var(--line); }
 .probe-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--audio); }
-.probe-title { max-width: 100%; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.probe-title {
+  max-width: 100%; max-height: 3.6em; font-size: 12.5px; font-weight: 600; color: var(--text);
+  white-space: normal; overflow-wrap: anywhere; overflow-y: auto;
+}
 .probe-title:hover { text-decoration: underline; }
 .probe-title-input { width: min(24rem, 100%); }
 .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: #0f1216; }
