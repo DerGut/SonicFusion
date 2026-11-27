@@ -1,7 +1,7 @@
 use std::{env, error::Error, fs, io};
 
 use sonicfusion::{
-    ExecutionConfig, device::play_default_device, dsl::build_live_plan, runtime::SynthRuntime,
+    ExecutionConfig, device::DeviceOutput, dsl::build_live_plan, runtime::SynthRuntime,
 };
 
 #[tokio::main]
@@ -15,14 +15,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => fs::read_to_string(path)?,
         None => "sine(220) -> gain(0.08) -> out".into(),
     };
-    let config = ExecutionConfig::default();
+    let output = DeviceOutput::default_device()?;
+    let config = ExecutionConfig::new(
+        output.sample_rate_hz(),
+        ExecutionConfig::default().batch_frame_capacity(),
+    )?;
     let runtime = SynthRuntime::start(build_live_plan(&graph, &config)?, config)?;
     let control = runtime.control();
     eprintln!(
-        "Playing on the default device at {} Hz. Ctrl-C to stop.",
-        config.sample_rate_hz()
+        "Selected output: {} Hz, {} channel(s), {} frames per processing batch. Ctrl-C to stop.",
+        config.sample_rate_hz(),
+        output.channels(),
+        config.batch_frame_capacity(),
     );
-    let playback = play_default_device(runtime);
+    let playback = output.play(runtime);
     tokio::pin!(playback);
     let stats = tokio::select! {
         result = &mut playback => result?,

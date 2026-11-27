@@ -8,7 +8,7 @@ use crate::{
     runtime::{ReplacementEvent, RunExit},
 };
 
-use super::{DeviceError, SynthRuntime, bridge, drive, oneshot, select_config};
+use super::{DeviceError, SynthRuntime, bridge, drive, negotiate_config, oneshot, select_config};
 use bridge::{Channels, Counters, PREFILL_BATCHES, QUEUE_BATCHES};
 
 fn config() -> ExecutionConfig {
@@ -66,6 +66,65 @@ fn device_format_is_native_float_at_the_session_rate() {
         select_config([stereo], 48_000).unwrap().0,
         Channels::DualMono
     );
+}
+
+#[test]
+fn negotiation_accepts_a_44k1_only_stereo_device() {
+    let supported = [native(2, 44_100, cpal::SampleFormat::F32)];
+    let (channels, stream) = negotiate_config(&supported, None).unwrap();
+    assert_eq!(channels, Channels::DualMono);
+    assert_eq!(stream.channels, 2);
+    assert_eq!(stream.sample_rate, 44_100);
+    assert_eq!(stream.buffer_size, cpal::BufferSize::Default);
+}
+
+#[test]
+fn negotiation_prefers_the_device_rate_over_the_runtime_default() {
+    use cpal::SampleFormat::{F32, I16};
+    let supported = [
+        native(2, 44_100, F32),
+        native(1, 48_000, F32),
+        native(1, 96_000, I16),
+    ];
+    let (_, stream) = negotiate_config(&supported, Some(44_100)).unwrap();
+    assert_eq!((stream.sample_rate, stream.channels), (44_100, 2));
+    let (_, stream) = negotiate_config(&supported, Some(96_000)).unwrap();
+    assert_eq!((stream.sample_rate, stream.channels), (48_000, 1));
+}
+
+#[test]
+fn fallback_uses_the_closest_rate_then_prefers_lower_rate_and_mono() {
+    use cpal::SampleFormat::F32;
+    let range = cpal::SupportedStreamConfigRange::new(
+        2,
+        44_000,
+        46_000,
+        cpal::SupportedBufferSize::Unknown,
+        F32,
+    );
+    let mut supported = [native(1, 50_000, F32), range, native(1, 46_000, F32)];
+    for _ in 0..2 {
+        let (_, stream) = negotiate_config(&supported, None).unwrap();
+        assert_eq!((stream.sample_rate, stream.channels), (46_000, 1));
+        supported.reverse();
+    }
+    let (_, stream) = negotiate_config(&supported, Some(45_000)).unwrap();
+    assert_eq!((stream.sample_rate, stream.channels), (45_000, 2));
+}
+
+#[test]
+fn negotiation_errors_describe_unusable_formats() {
+    use cpal::SampleFormat::{F32, I16};
+    let supported = [native(2, 44_100, I16), native(6, 48_000, F32)];
+    let err = negotiate_config(&supported, None).unwrap_err();
+    let DeviceError::NoCompatibleFormat { advertised } = err else {
+        panic!("unexpected error: {err}");
+    };
+    assert_eq!(advertised, "2 ch i16 at 44100 Hz, 6 ch f32 at 48000 Hz");
+    assert!(matches!(
+        negotiate_config(&[], None),
+        Err(DeviceError::NoCompatibleFormat { advertised }) if advertised == "none"
+    ));
 }
 
 #[tokio::test]
