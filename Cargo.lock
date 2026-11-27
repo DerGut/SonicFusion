@@ -2881,7 +2881,6 @@ dependencies = [
  "datafusion",
  "futures",
  "hound",
- "libc",
  "rtrb",
  "tempfile",
  "thiserror 2.0.20",

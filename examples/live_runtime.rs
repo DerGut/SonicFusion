@@ -161,15 +161,7 @@ fn read_graph_file(path: impl AsRef<Path>) -> io::Result<String> {
         return Err(not_regular_file());
     }
 
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // A path replaced by a FIFO after the metadata check must not block open.
-        options.custom_flags(libc::O_NONBLOCK);
-    }
-    let mut file = options.open(path)?;
+    let mut file = fs::File::open(path)?;
     if !file.metadata()?.is_file() {
         return Err(not_regular_file());
     }

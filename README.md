@@ -70,9 +70,11 @@ requirements, and bounded queue as `live_play`. Open an editor while it runs,
 save a complete graph such as `sine(440) -> gain(0.08) -> out` to `edit.sf`, and
 type `load edit.sf` in the running example's terminal. Paths are relative to the
 example's working directory and must refer to regular files, not pipes or
-devices. `load` reads the file only on command and keeps the same device session
-open. Each submission gets a revision number. If two edits are already in
-flight, wait for one to finish and retry.
+devices. File reads run on the input thread, so a stalled read can delay terminal
+commands. Ctrl-C still stops playback.
+`load` reads the file only on command and keeps the same device session open.
+Each submission gets a revision number. If two edits are already in flight,
+wait for one to finish and retry.
 
 After hearing the 440 Hz tone, save `sine(24000) -> out` and run `load edit.sf`
 again. The edit is rejected at Nyquist and the tone continues. Then save
