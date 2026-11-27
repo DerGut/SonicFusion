@@ -5,6 +5,7 @@
  *   npm --prefix editor run dev  →  http://localhost:5173/?scenario=edge&pitch=B&name=B
  *
  * `?pitch=` A (current) · B (patch-wide unit, dual readout) · C (keyboard popover)
+ *           D (per-node unit, default from role, dual readout + popover)
  * `?name=`  A (current) · B (in-place rename, ID chip) · C (stacked ID, rename in panel)
  * `?scenario=edge` seeds duplicate, long and named nodes plus an off-semitone oscillator.
  *
@@ -29,6 +30,7 @@ const VARIANTS: Record<Key, { id: string; label: string }[]> = {
     { id: "A", label: "Current: per-param Hz/Note select" },
     { id: "B", label: "Patch-wide unit, dual readout" },
     { id: "C", label: "Both units, keyboard popover" },
+    { id: "D", label: "Per-node unit, role default" },
   ],
   name: [
     { id: "A", label: "Current: pencil button" },
@@ -241,13 +243,42 @@ export function useModulatedReadout(): ((baseHz: number, depthHz: number, curren
     const range = `${noteName(pitchFromHz(base - depth)!.midi)}–${noteName(pitchFromHz(base + depth)!.midi)}`;
     const hz = `${formatHz(base)} ± ${Math.round(depth)} Hz`;
     if (variant === "B") return unit === "note" ? range : hz;
+    if (variant === "D") return hz;
     return `${hz} · ${range}`;
   };
 }
 
-/** Replaces ParamControl for frequency params in variants B and C. Returns null for A. */
-export function PrototypeFrequency({ id, descriptor, value, invalid, onChange, onBeginContinuous }: {
+/**
+ * D: the unit belongs to the node. It defaults from the node's role and is
+ * stored only when the user overrides it (in the real version, on DocNode
+ * next to `displayName`; here in memory).
+ */
+type Unit = "hz" | "note";
+const unitOverrides = new Map<string, Unit>();
+const overrideListeners = new Set<() => void>();
+let overrideVersion = 0;
+const subscribeOverrides = (listener: () => void) => {
+  overrideListeners.add(listener);
+  return () => overrideListeners.delete(listener);
+};
+function setOverride(key: string, unit: Unit, fallback: Unit) {
+  if (unit === fallback) unitOverrides.delete(key);
+  else unitOverrides.set(key, unit);
+  overrideVersion += 1;
+  overrideListeners.forEach((listener) => listener());
+}
+function useUnitOverride(key: string): Unit | undefined {
+  useSyncExternalStore(subscribeOverrides, () => overrideVersion);
+  return unitOverrides.get(key);
+}
+if (new URLSearchParams(window.location.search).get("scenario") === "edge") unitOverrides.set("osc_b:frequency_hz", "hz");
+
+/** Replaces ParamControl for frequency params in variants B–D. Returns null for A. */
+export function PrototypeFrequency({ id, nodeId, modulator, descriptor, value, invalid, onChange, onBeginContinuous }: {
   id: string;
+  nodeId: string;
+  /** The node feeds a control port, so its frequency is a rate. */
+  modulator: boolean;
   descriptor: ParamDescriptor;
   value: number;
   invalid?: string;
@@ -258,12 +289,18 @@ export function PrototypeFrequency({ id, descriptor, value, invalid, onChange, o
   const [unit] = usePatchUnit();
   const [typing, setTyping] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const overrideKey = `${nodeId}:${descriptor.name}`;
+  const override = useUnitOverride(overrideKey);
   if (variant === "A") return null;
   const pitch = isPitch(value) ? pitchFromHz(value) : null;
-  const notePrimary = variant === "C" || unit === "note";
+  const roleUnit: Unit = modulator || !pitch ? "hz" : "note";
+  const nodeUnit = override ?? roleUnit;
+  const notePrimary = variant === "D" ? nodeUnit === "note" && pitch !== null : variant === "C" || unit === "note";
 
   const primary = pitch && notePrimary ? formatPitch(pitch) : formatHz(value);
-  const secondary = pitch ? (notePrimary ? formatHz(value) : formatPitch(pitch)) : variant === "B" && unit === "note" ? "rate" : null;
+  const rate = !pitch;
+  const secondary = variant === "D" && rate ? "rate"
+    : pitch ? (notePrimary ? formatHz(value) : formatPitch(pitch)) : variant === "B" && unit === "note" ? "rate" : null;
   const commit = () => {
     if (typing !== null && typing.trim() !== "") {
       const parsed = parseFrequency(typing);
@@ -271,8 +308,9 @@ export function PrototypeFrequency({ id, descriptor, value, invalid, onChange, o
     }
     setTyping(null);
   };
-  // B in Note mode snaps the drag to semitones; ⌥ drags freely.
-  const snap = variant === "B" && unit === "note" && pitch !== null;
+  // B in Note mode and D on note-led nodes snap the drag to semitones; ⌥ drags freely.
+  const snap = (variant === "B" || variant === "D") && notePrimary && pitch !== null;
+  const popover = variant === "C" || (variant === "D" && notePrimary);
   const move = (position: number, event?: { altKey: boolean }) => {
     const hz = fromSlider(descriptor, position);
     if (!snap || event?.altKey || !isPitch(hz)) return onChange(hz, true);
@@ -283,7 +321,22 @@ export function PrototypeFrequency({ id, descriptor, value, invalid, onChange, o
     <div className={`param proto-freq${invalid ? " invalid" : ""}`} title={invalid}>
       <div className="param-top">
         <label htmlFor={id}>{descriptor.label}</label>
-        {typing === null ? (
+        {typing === null && variant === "D" ? (
+          <span className="proto-dual">
+            <button type="button" className="value nodrag"
+              title={popover ? "Click for keyboard, detune and exact value" : "Click to type Hz or a note (C#4, A3 +12c)"}
+              onClick={() => (popover ? setOpen(!open) : setTyping(String(value)))}>
+              {primary}
+            </button>
+            {secondary && (rate ? <span className="proto-secondary">{secondary}</span> : (
+              <button type="button" className={`proto-secondary proto-swap nodrag${override ? " overridden" : ""}`}
+                title={`Lead with ${notePrimary ? "Hz" : "the note"} on this node${override ? "" : ` (default for ${modulator ? "a modulator" : "an audio source"})`}`}
+                onClick={() => { setOpen(false); setOverride(overrideKey, notePrimary ? "hz" : "note", roleUnit); }}>
+                {secondary}
+              </button>
+            ))}
+          </span>
+        ) : typing === null ? (
           <button type="button" className="value proto-dual nodrag"
             title={variant === "C" ? "Click for keyboard, detune and Hz" : "Click to type Hz or a note (C#4, A3 +12c)"}
             onClick={() => (variant === "C" && pitch ? setOpen(!open) : setTyping(pitch && notePrimary ? formatPitch(pitch) : String(value)))}>

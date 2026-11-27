@@ -99,7 +99,8 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       );
     } else if (pitchVariant !== "A" && (isCutoff || isOscillatorFrequency)) {
       rows.push(
-        <PrototypeFrequency key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
+        <PrototypeFrequency key={param.name} id={`${node.id}-${param.name}`} nodeId={node.id} descriptor={param}
+          modulator={data.outgoing.some((wire) => wire.endsWith(":cutoff"))}
           value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
           onBeginContinuous={actions.beginContinuous}
           onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
