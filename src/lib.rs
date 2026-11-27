@@ -9,6 +9,8 @@ pub mod runtime;
 
 pub use config::{ExecutionConfig, RenderConfig, RenderConfigBuilder};
 pub use layout::frame::frame_schema;
+#[cfg(feature = "audio-device")]
+pub use output::device;
 pub use output::{
     AudioChunk, StreamingWavStats, write_streaming_wav, write_streaming_wav_at, write_wav,
     write_waveform_svg,
@@ -27,6 +29,10 @@ pub enum Error {
 
     #[error("render stream failed: {0}")]
     RenderStream(#[from] datafusion::error::DataFusionError),
+
+    #[cfg(feature = "audio-device")]
+    #[error(transparent)]
+    Device(#[from] device::DeviceError),
 
     #[error("failed to {action} WAV at {path}: {source}")]
     WavError {
