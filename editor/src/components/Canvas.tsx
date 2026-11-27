@@ -149,7 +149,7 @@ export function Canvas(props: Props) {
       if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (target instanceof Element && target !== document.body && !canvas.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("input, textarea, button, [role='menu']")) return;
+      if (target instanceof Element && target.closest("input, textarea, select, button, [role='menu']")) return;
       event.preventDefault();
       const box = canvas.current?.getBoundingClientRect();
       const inside = box && pointer.current.x >= box.left && pointer.current.x <= box.right

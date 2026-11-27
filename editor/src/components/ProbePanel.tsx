@@ -4,7 +4,7 @@ import type { EngineClient } from "../api/client";
 import { type GraphSpec, type ProbeWindow, type SessionInfo, isCommandError } from "../api/types";
 import type { DocNode } from "../model/document";
 import { noteName, pitchFromHz } from "../model/pitch";
-import { formatDb, formatHz, spectrumDb, strongestPartialHz, triggerIndex } from "../model/signal";
+import { formatDb, formatHz, spectrumDb, strongestPartial, triggerIndex } from "../model/signal";
 import { describe } from "../state/useEngineSession";
 import { Icon } from "./icons";
 
@@ -65,8 +65,9 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
   const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
   const rate = probe?.sample_rate_hz ?? session.sample_rate_hz;
   const spectrum = useMemo(() => (samples.length === PROBE_FRAMES ? spectrumDb(samples) : []), [samples]);
-  const partialHz = strongestPartialHz(spectrum, rate);
-  const partialPitch = view === "spectrum" && partialHz !== null ? pitchFromHz(partialHz) : null;
+  const partial = strongestPartial(spectrum, rate);
+  const partialPitch = view === "spectrum" && partial?.canNamePitch ? pitchFromHz(partial.hz) : null;
+  const partialLabel = partial ? (partial.canNamePitch ? "" : "≈") + formatHz(partial.hz) : "—";
   const cutoff = lowPassMarker(graph, node, session);
 
   return (
@@ -110,7 +111,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
           <div><dt>Peak</dt><dd>{probe ? `${formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS` : "—"}</dd></div>
           <div>
             <dt>Strongest partial</dt>
-            <dd>{partialHz === null ? "—" : formatHz(partialHz)}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
+            <dd>{partialLabel}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
           </div>
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
           <div><dt>Window</dt><dd>{PROBE_FRAMES} frames</dd></div>

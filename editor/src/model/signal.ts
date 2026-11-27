@@ -73,7 +73,7 @@ function fft(real: Float64Array, imag: Float64Array) {
 }
 
 /** Estimate the strongest AC component between FFT bins in a Hann window. */
-export function strongestPartialHz(spectrum: number[], rate: number): number | null {
+export function strongestPartial(spectrum: number[], rate: number): { hz: number; canNamePitch: boolean } | null {
   let peakBin = 0;
   let peakDb = SPECTRUM_FLOOR_DB;
   for (let bin = 1; bin < spectrum.length; bin++) {
@@ -91,7 +91,11 @@ export function strongestPartialHz(spectrum: number[], rate: number): number | n
     const curvature = left - 2 * peakDb + right;
     if (curvature < 0) correction = 0.5 * (left - right) / curvature;
   }
-  return ((peakBin + correction) * rate) / (2 * spectrum.length);
+  return {
+    hz: ((peakBin + correction) * rate) / (2 * spectrum.length),
+    // Near DC, different bass pitches can peak in the same first AC bin.
+    canNamePitch: peakBin > 1,
+  };
 }
 
 export function formatHz(hz: number): string {

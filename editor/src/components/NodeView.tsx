@@ -72,7 +72,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
     const isCutoff = param.name === "cutoff_hz";
-    const frequency = isCutoff || param.name === "frequency_hz";
+    const isOscillatorFrequency = param.name === "frequency_hz";
     const modulated = isCutoff && control && sources[control.name];
     if (modulated) {
       const { base_hz, depth_hz } = session.cutoff_modulation;
@@ -95,7 +95,9 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       rows.push(
         <ParamControl key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
           value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
-          frequencyMode={frequency ? frequencyMode : undefined} onFrequencyMode={setFrequencyMode}
+          frequency={isCutoff || isOscillatorFrequency
+            ? { mode: frequencyMode, onModeChange: setFrequencyMode, semitones: isOscillatorFrequency }
+            : undefined}
           onBeginContinuous={actions.beginContinuous}
           onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
       );

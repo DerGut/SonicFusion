@@ -49,27 +49,31 @@ interface Props {
   label?: string;
   value: number;
   invalid?: string;
-  frequencyMode?: FrequencyMode;
-  onFrequencyMode?: (mode: FrequencyMode) => void;
+  frequency?: {
+    mode: FrequencyMode;
+    onModeChange: (mode: FrequencyMode) => void;
+    semitones: boolean;
+  };
   /** `continuous` while dragging, so the edit history records one step. */
   onChange: (value: number, continuous: boolean) => void;
   onBeginContinuous: () => void;
 }
 
 /** Label, value (click to type) and slider for one numeric parameter. */
-export function ParamControl({ id, descriptor, label = descriptor.label, value, invalid, frequencyMode, onFrequencyMode,
+export function ParamControl({ id, descriptor, label = descriptor.label, value, invalid, frequency,
   onChange, onBeginContinuous }: Props) {
   const [typing, setTyping] = useState<string | null>(null);
   const [referenceNote, setReferenceNote] = useState<number>();
-  const pitch = frequencyMode === "note" ? pitchFromHz(value, referenceNote) : null;
-  const noteSlider = frequencyMode === "note" && descriptor.name === "frequency_hz";
+  const noteMode = frequency?.mode === "note";
+  const pitch = noteMode ? pitchFromHz(value, referenceNote) : null;
+  const noteSlider = noteMode && frequency.semitones;
   const oscillatorPitch = noteSlider ? pitch : null;
   const minNote = noteSlider ? Math.ceil(hzToMidi(descriptor.min)) : 0;
   const readout = oscillatorPitch ? noteName(oscillatorPitch.midi) : pitch ? formatPitch(pitch) : formatValue(descriptor, value);
   const editValue = pitch ? formatPitch(pitch) : String(value);
   const commit = () => {
     if (typing !== null && typing.trim() !== "" && typing !== editValue) {
-      const parsed = frequencyMode ? parseFrequency(typing) : Number(typing);
+      const parsed = frequency ? parseFrequency(typing) : Number(typing);
       if (Number.isFinite(parsed) && parsed !== value) {
         setReferenceNote(undefined);
         onChange(parsed, false);
@@ -88,12 +92,11 @@ export function ParamControl({ id, descriptor, label = descriptor.label, value, 
         <div className="param-top">
           <div className="param-label">
             <label htmlFor={id}>{label}</label>
-            {frequencyMode && onFrequencyMode &&
-              <FrequencyModeSelect label={label} mode={frequencyMode} onChange={onFrequencyMode} />}
+            {frequency && <FrequencyModeSelect label={label} mode={frequency.mode} onChange={frequency.onModeChange} />}
           </div>
           {typing === null ? (
             <button type="button" className="value nodrag"
-              title={frequencyMode ? "Click to type a frequency or note (C#4)" : "Click to type a value"}
+              title={frequency ? "Click to type a frequency or note (C#4)" : "Click to type a value"}
               aria-label={label + ": " + readout + ". Type a value"}
               onClick={() => setTyping(editValue)}>
               {readout}
