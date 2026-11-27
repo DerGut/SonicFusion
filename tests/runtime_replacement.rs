@@ -123,6 +123,7 @@ async fn invalid_submissions_leave_the_pending_valid_revision_for_explicit_super
         else {
             panic!("invalid preparation was not rejected: {graph}");
         };
+        let error: sonicfusion::dsl::DslError = error;
         assert!(error.to_string().contains(expected), "{error}");
         assert!(invalid.next_event().await.is_none());
         assert!(first.next_event().now_or_never().is_none());
@@ -143,6 +144,48 @@ async fn invalid_submissions_leave_the_pending_valid_revision_for_explicit_super
     assert_eq!(output.chunks.len(), 1);
     assert_eq!(output.chunks[0].frame_range(), 8..12);
     assert_eq!(output.chunks[0].samples(), [0.25; 4]);
+}
+
+#[cfg(feature = "substrait-spike")]
+#[tokio::test]
+async fn substrait_replacement_uses_the_live_boundary_and_rejects_invalid_plans() {
+    let config = ExecutionConfig::new(48_000, 4).unwrap().at_frame(8);
+    let runtime = start(OLD, config);
+    let control = runtime.control();
+    let (credits, mut output) = FakeOutput::new();
+    let mut run = Box::pin(runtime.run(&mut output));
+    credits.send(4).unwrap();
+    assert!(futures::poll!(&mut run).is_pending());
+    assert_eq!(control.next_output_frame(), 12);
+
+    let bytes = include_bytes!("fixtures/substrait/sine_gain.pb");
+    let mut replacement = control.submit_substrait_replacement(bytes.to_vec());
+    assert!(matches!(
+        replacement.next_event().await,
+        Some(ReplacementEvent::Accepted)
+    ));
+    let mut invalid = control.submit_substrait_replacement(vec![0xff]);
+    assert!(matches!(
+        invalid.next_event().await,
+        Some(ReplacementEvent::SubstraitPreparationRejected { .. })
+    ));
+    assert!(invalid.next_event().await.is_none());
+    assert!(replacement.next_event().now_or_never().is_none());
+
+    credits.send(4).unwrap();
+    assert!(futures::poll!(&mut run).is_pending());
+    assert_applied(&mut replacement, 12).await;
+    control.stop();
+    assert_eq!(run.await.unwrap(), RunExit::Stopped);
+    assert_eq!(ranges(&output), [8..12, 12..16]);
+    assert_eq!(
+        output.chunks[0].samples(),
+        standalone_samples(OLD, config, 1).await
+    );
+    assert_eq!(
+        output.chunks[1].samples(),
+        standalone_samples("sine(440) -> gain(0.25) -> out", config.at_frame(12), 1).await
+    );
 }
 
 #[tokio::test]

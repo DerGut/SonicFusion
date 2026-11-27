@@ -7,11 +7,31 @@ use tokio::sync::{mpsc, watch};
 
 use crate::{
     Error, ExecutionConfig,
-    dsl::{DslError, PreparedGraph, prepare_graph},
+    dsl::{DslError, prepare_graph},
+    graph::PreparedGraph,
 };
 
+#[derive(Debug, thiserror::Error)]
+enum PreparationError {
+    #[error(transparent)]
+    Dsl(#[from] DslError),
+    #[cfg(feature = "substrait-spike")]
+    #[error(transparent)]
+    Substrait(#[from] crate::substrait::SubstraitError),
+}
+
+impl PreparationError {
+    fn into_event(self) -> ReplacementEvent {
+        match self {
+            Self::Dsl(error) => ReplacementEvent::PreparationRejected { error },
+            #[cfg(feature = "substrait-spike")]
+            Self::Substrait(error) => ReplacementEvent::SubstraitPreparationRejected { error },
+        }
+    }
+}
+
 /// Producer-side feedback for a single [replacement request](ReplacementRequest).
-/// `Superseded`, either rejection, `RunClosed`, and `Applied` are terminal.
+/// `Superseded`, rejections, `RunClosed`, and `Applied` are terminal.
 #[derive(Debug)]
 pub enum ReplacementEvent {
     /// Preparation succeeded and the request entered the pending slot.
@@ -23,6 +43,11 @@ pub enum ReplacementEvent {
     },
     PreparationRejected {
         error: DslError,
+    },
+    /// The experimental Substrait plan did not pass preparation.
+    #[cfg(feature = "substrait-spike")]
+    SubstraitPreparationRejected {
+        error: crate::substrait::SubstraitError,
     },
     /// The producer claimed the request at the next frame not yet admitted.
     Scheduled {
@@ -121,9 +146,16 @@ impl RuntimeControl {
         self.submit_preparing(move |config| prepare_graph(&source, config))
     }
 
-    fn submit_preparing(
+    /// Submit an experimental mono Substrait plan through the same replacement
+    /// slot and frame-boundary scheduling as a DSL submission.
+    #[cfg(feature = "substrait-spike")]
+    pub fn submit_substrait_replacement(&self, bytes: Vec<u8>) -> ReplacementRequest {
+        self.submit_preparing(move |config| crate::substrait::prepare_graph(&bytes, config))
+    }
+
+    fn submit_preparing<E: Into<PreparationError>>(
         &self,
-        prepare: impl FnOnce(&ExecutionConfig) -> Result<PreparedGraph, DslError> + Send + 'static,
+        prepare: impl FnOnce(&ExecutionConfig) -> Result<PreparedGraph, E> + Send + 'static,
     ) -> ReplacementRequest {
         // Each request emits at most acceptance, scheduling, and a terminal
         // event. Feedback never blocks the producer, even if unread.
@@ -141,7 +173,7 @@ impl RuntimeControl {
         } else {
             let control = self.clone();
             tokio::task::spawn_blocking(move || {
-                let prepared = prepare(&control.config);
+                let prepared = prepare(&control.config).map_err(Into::into);
                 control.publish(revision, feedback, prepared);
             });
         }
@@ -152,12 +184,12 @@ impl RuntimeControl {
         &self,
         revision: u64,
         feedback: mpsc::Sender<ReplacementEvent>,
-        prepared: Result<PreparedGraph, DslError>,
+        prepared: Result<PreparedGraph, PreparationError>,
     ) {
         let mut slot = self.replacements.lock().unwrap();
         let event = match prepared {
             _ if slot.closed => ReplacementEvent::RunClosed,
-            Err(error) => ReplacementEvent::PreparationRejected { error },
+            Err(error) => error.into_event(),
             Ok(_) if revision < slot.latest_valid_revision => ReplacementEvent::Superseded {
                 by_revision: slot.latest_valid_revision,
             },
@@ -208,6 +240,41 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::*;
+
+    #[cfg(feature = "substrait-spike")]
+    #[tokio::test]
+    async fn late_preparation_is_superseded_across_formats_in_both_directions() {
+        const WIRE: &[u8] = include_bytes!("../../tests/fixtures/substrait/sine_gain.pb");
+        const DSL: &str = "sine(220) -> out";
+        for late_is_substrait in [false, true] {
+            let control = RuntimeControl::new(ExecutionConfig::default());
+            let (release, blocked) = oneshot::channel::<()>();
+            let mut late = control.submit_preparing(move |config| -> Result<_, PreparationError> {
+                blocked.blocking_recv().unwrap();
+                if late_is_substrait {
+                    Ok(crate::substrait::prepare_graph(WIRE, config)?)
+                } else {
+                    Ok(prepare_graph(DSL, config)?)
+                }
+            });
+            let mut newer = if late_is_substrait {
+                control.submit_replacement(DSL)
+            } else {
+                control.submit_substrait_replacement(WIRE.to_vec())
+            };
+            assert!(matches!(
+                newer.next_event().await,
+                Some(ReplacementEvent::Accepted)
+            ));
+            assert!(control.claim_replacement().is_some());
+            release.send(()).unwrap();
+            assert!(matches!(late.next_event().await,
+                Some(ReplacementEvent::Superseded { by_revision }) if by_revision == newer.revision()
+            ));
+            assert!(late.next_event().await.is_none());
+            assert!(control.claim_replacement().is_none());
+        }
+    }
 
     #[tokio::test]
     async fn late_preparation_cannot_reenter_after_a_newer_claim_or_close() {

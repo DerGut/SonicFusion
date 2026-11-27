@@ -1,11 +1,14 @@
 mod config;
 pub mod dsl;
 mod dsp;
+mod graph;
 mod layout;
 mod output;
 pub mod physical;
 mod render;
 pub mod runtime;
+#[cfg(feature = "substrait-spike")]
+pub mod substrait;
 
 pub use config::{ExecutionConfig, RenderConfig, RenderConfigBuilder};
 pub use layout::frame::frame_schema;

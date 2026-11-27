@@ -1,0 +1,45 @@
+version { minor_number: 85 }
+extension_urns {
+  extension_urn_anchor: 7
+  urn: "extension:io.substrait:functions_arithmetic"
+}
+extensions {
+  extension_function {
+    extension_urn_reference: 7
+    function_anchor: 11
+    name: "multiply:fp32_fp32"
+  }
+}
+relations {
+  root {
+    names: "sample"
+    input {
+      project {
+        common { emit { output_mapping: 1 } }
+        input {
+          extension_leaf {
+            common { direct {} }
+            detail {
+              [type.googleapis.com/sonicfusion.spike.v1.Sine] { frequency_hz: 440 }
+            }
+          }
+        }
+        expressions {
+          scalar_function {
+            function_reference: 11
+            output_type { fp32 { nullability: NULLABILITY_REQUIRED } }
+            arguments {
+              value {
+                selection {
+                  direct_reference { struct_field { field: 0 } }
+                  root_reference {}
+                }
+              }
+            }
+            arguments { value { literal { fp32: 0.25 } } }
+          }
+        }
+      }
+    }
+  }
+}
