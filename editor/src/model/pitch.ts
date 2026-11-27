@@ -1,4 +1,5 @@
 export const PITCH_FLOOR_HZ = 20;
+export const DETUNE_STEP = 0.1;
 export type FrequencyMode = "hz" | "note";
 
 const A4_HZ = 440;
@@ -42,6 +43,20 @@ export function snapSliderHz(hz: number, min: number, max: number, direction = 0
   if (first > last) return hz;
   const nearest = Math.round(hzToMidi(hz)) + direction;
   return pitchToHz({ midi: Math.min(last, Math.max(first, nearest)), cents: 0 });
+}
+
+/** Slider bounds rounded inward to the resolutions the range can emit. */
+export function detuneBounds(midi: number, minHz: number, maxHz: number): { min: number; max: number } | null {
+  const center = pitchToHz({ midi, cents: 0 });
+  const minCents = Math.max(-50, 1200 * Math.log2(minHz / center));
+  const maxCents = Math.min(50, 1200 * Math.log2(maxHz / center));
+  const ticksPerCent = 1 / DETUNE_STEP;
+  let minTick = Math.ceil(minCents * ticksPerCent);
+  let maxTick = Math.floor(maxCents * ticksPerCent);
+  // The conversion back to Hz can round across an exact boundary.
+  if (pitchToHz({ midi, cents: minTick / ticksPerCent }) < minHz) minTick++;
+  if (pitchToHz({ midi, cents: maxTick / ticksPerCent }) > maxHz) maxTick--;
+  return minTick <= maxTick ? { min: minTick / ticksPerCent, max: maxTick / ticksPerCent } : null;
 }
 
 export function noteName(midi: number): string {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultFrequencyMode, formatCents, noteName, parseFrequency, pitchFromHz, pitchToHz, snapSliderHz } from "./pitch";
+import { defaultFrequencyMode, detuneBounds, formatCents, noteName, parseFrequency, pitchFromHz, pitchToHz, snapSliderHz } from "./pitch";
 
 describe("frequency and pitch", () => {
   it("defaults audible audio signals to notes and control or subaudio signals to Hz", () => {
@@ -15,6 +15,21 @@ describe("frequency and pitch", () => {
     expect(snapSliderHz(0.5, 0.01, 20_000)).toBe(0.5);
     expect(snapSliderHz(220, 20, 219)).toBe(parseFrequency("G#3"));
     expect(snapSliderHz(20, 20, 20_000)).toBeGreaterThanOrEqual(20);
+  });
+
+  it("limits detune so the edited pitch stays below Nyquist and above the pitch floor", () => {
+    const high = pitchFromHz(parseFrequency("B9"))!.midi;
+    const limited = detuneBounds(high, 20, 16_000 * (1 - Number.EPSILON))!;
+    expect(limited.min).toBe(-50);
+    expect(limited.max).toBeLessThan(50);
+    expect(pitchToHz({ midi: high, cents: limited.max })).toBeLessThan(16_000);
+
+    const low = pitchFromHz(20)!.midi;
+    const nearFloor = detuneBounds(low, 20, 20_000)!;
+    expect(nearFloor.min).toBeGreaterThan(0);
+    expect(pitchToHz({ midi: low, cents: nearFloor.min })).toBeGreaterThanOrEqual(20);
+    expect(detuneBounds(69, 20, 20_000)).toEqual({ min: -50, max: 50 });
+    expect(detuneBounds(pitchFromHz(24_500)!.midi, 20, 20_000)).toBeNull();
   });
 
   it("uses A4 = 440 Hz and C4 = MIDI 60", () => {

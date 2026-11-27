@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { formatCents, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type Pitch } from "../model/pitch";
+import { DETUNE_STEP, detuneBounds, formatCents, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type Pitch } from "../model/pitch";
 import { ParameterRange } from "./ParameterRange";
 
 const WHITE_KEYS_PER_OCTAVE = 7;
@@ -27,6 +27,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   const [text, setText] = useState<string | null>(null);
   const [browsedOctave, setBrowsedOctave] = useState<number | null>(null);
   const floorHz = Math.max(min, PITCH_FLOOR_HZ);
+  const detune = pitch && detuneBounds(pitch.midi, floorHz, max);
   const lowestOctave = octaveOf(Math.ceil(hzToMidi(floorHz)));
   const highestOctave = Math.max(lowestOctave, octaveOf(Math.floor(hzToMidi(max))) - 1);
   const octave = Math.min(highestOctave, Math.max(lowestOctave, browsedOctave ?? octaveOf(pitch?.midi ?? 0)));
@@ -72,7 +73,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   };
 
   return createPortal(
-    <div className="frequency-popover nodrag nowheel" ref={panel} id={id}
+    <div className="frequency-popover nodrag nowheel nokey" ref={panel} id={id}
       role="dialog" aria-label={"Edit " + label}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -115,16 +116,20 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
               );
             })}
           </div>
-          <div className="param-top">
-            <label htmlFor={id + "-detune"}>Detune</label>
-            <span>{formatCents(pitch.cents)}</span>
-          </div>
-          <ParameterRange id={id + "-detune"} min={-50} max={50} step={0.1} position={pitch.cents}
-            valueText={formatCents(pitch.cents)} onBeginContinuous={onBeginContinuous}
-            onMove={(cents) => {
-              setText(null);
-              onPitch({ midi: pitch.midi, cents }, true);
-            }} />
+          {detune && (
+            <>
+              <div className="param-top">
+                <label htmlFor={id + "-detune"}>Detune</label>
+                <span>{formatCents(pitch.cents)}</span>
+              </div>
+              <ParameterRange id={id + "-detune"} min={detune.min} max={detune.max} step={DETUNE_STEP} position={pitch.cents}
+                valueText={formatCents(pitch.cents)} onBeginContinuous={onBeginContinuous}
+                onMove={(cents) => {
+                  setText(null);
+                  onPitch({ midi: pitch.midi, cents }, true);
+                }} />
+            </>
+          )}
         </>
       )}
       <form className="frequency-exact" onSubmit={(event) => {

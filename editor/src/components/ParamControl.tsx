@@ -42,7 +42,7 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
   const position = toSlider(descriptor, value);
   const commit = () => {
     const parsed = Number(typing);
-    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed)) onChange(parsed, false);
+    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
     setTyping(null);
   };
   return (
