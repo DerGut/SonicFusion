@@ -25,6 +25,7 @@ import {
   parseDocument,
   removeMixInput,
   removeNodes,
+  renameNode,
   setParam,
   studioDocument,
   toGraph,
@@ -166,6 +167,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
 
   const actions = useMemo<NodeActions>(
     () => ({
+      renameNode: (id, name) => edit((current) => renameNode(current, id, name)),
       setParam: (id: string, name: string, value: ParamValue, continuous: boolean) =>
         edit((current) => setParam(current, id, name, value), !continuous),
       beginContinuous: () => dispatch({ type: "checkpoint" }),

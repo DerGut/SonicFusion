@@ -18,11 +18,12 @@ export interface DocNode {
   kind: NodeKind;
   params: Record<string, ParamValue>;
   position: Position;
+  displayName?: string;
 }
 
 /**
- * The editor's project file: the graph plus layout. Layout never reaches the
- * engine; `toGraph` strips it.
+ * The editor's project file: the graph plus layout and display names.
+ * `toGraph` passes only graph fields to the engine.
  */
 export interface EditorDocument {
   format: "sonicfusion-editor";
@@ -192,6 +193,16 @@ export function moveNodes(doc: EditorDocument, positions: Map<string, Position>)
   };
 }
 
+export function renameNode(doc: EditorDocument, id: string, name: string): EditorDocument {
+  const node = doc.nodes.find((candidate) => candidate.id === id);
+  const displayName = name.trim();
+  if (!node || (node.displayName ?? "") === displayName) return doc;
+  const renamed = { ...node };
+  if (displayName) renamed.displayName = displayName;
+  else delete renamed.displayName;
+  return { ...doc, nodes: doc.nodes.map((candidate) => (candidate === node ? renamed : candidate)) };
+}
+
 export function setParam(doc: EditorDocument, id: string, name: string, value: ParamValue): EditorDocument {
   return {
     ...doc,
@@ -246,6 +257,7 @@ export function parseDocument(text: string): EditorDocument {
     const position = candidate?.position;
     if (
       typeof candidate?.id !== "string" ||
+      (candidate.displayName !== undefined && typeof candidate.displayName !== "string") ||
       !KINDS.has(candidate.kind as NodeKind) ||
       typeof candidate.params !== "object" ||
       candidate.params === null ||

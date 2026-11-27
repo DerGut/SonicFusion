@@ -43,6 +43,7 @@ export function pickUpWire(event: React.PointerEvent | React.MouseEvent, wireId:
 }
 
 export interface NodeActions {
+  renameNode(id: string, name: string): void;
   setParam(id: string, name: string, value: ParamValue, continuous: boolean): void;
   beginContinuous(): void;
   addMixInput(id: string): void;

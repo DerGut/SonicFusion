@@ -1,5 +1,5 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { memo } from "react";
+import { memo, useState } from "react";
 
 import type { PortDescriptor } from "../api/types";
 import { formatHz } from "../model/signal";
@@ -11,6 +11,8 @@ import { ParamControl } from "./ParamControl";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const { node, descriptor, ports, sources, issues, actions, session } = data;
+  const [renaming, setRenaming] = useState(false);
+  const title = node.displayName?.trim() || node.id;
   const errors = issues.filter((issue) => issue.severity === "error");
   const warning = issues.find((issue) => issue.severity === "warning");
   const portIssue = (port: string) => errors.find((issue) => issue.port === port)?.message;
@@ -96,7 +98,28 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     <div className={className}>
       <div className="sf-node-header">
         <KindIcon kind={node.kind} />
-        <span className="sf-node-title">{node.id}</span>
+        {renaming ? (
+          <input className="sf-node-title sf-node-title-input nodrag" autoFocus
+            aria-label="Node display name" defaultValue={node.displayName ?? ""} placeholder={node.id}
+            onFocus={(event) => event.currentTarget.select()}
+            onBlur={(event) => {
+              actions.renameNode(node.id, event.currentTarget.value);
+              setRenaming(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === "Enter" || event.key === "Escape") {
+                event.stopPropagation();
+                if (event.key === "Escape") event.currentTarget.value = node.displayName ?? "";
+                event.currentTarget.blur();
+              }
+            }} />
+        ) : (
+          <button type="button" className="sf-node-title sf-node-title-button nodrag"
+            title={`Rename ${title}`} aria-label={`Rename node ${title}`} onClick={() => setRenaming(true)}>
+            {title}
+          </button>
+        )}
         <span className="sf-node-kind">{descriptor.signature.split("(")[0]}</span>
       </div>
       <div className="sf-node-io">
