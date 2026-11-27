@@ -9,6 +9,7 @@ npm run tauri dev   # desktop app with the real engine
 npm run dev         # browser only, against a mock engine (no sound)
 npm test            # UI unit tests
 cd src-tauri && cargo test   # command layer, headless
+cargo test -p sonicfusion-host --test device_session -- --ignored   # real output, silent
 ```
 
 ## How it reaches the engine
@@ -34,6 +35,6 @@ The node vocabulary (kinds, ports, parameter ranges) comes from `sonicfusion_gra
 - **Circuits are bounded.** A chain may be at most 256 nodes deep. The engine re-runs a shared node once per consumer, so reconvergent fan-out is capped at 256 node executions per circuit.
 - **Adding nodes:** drag from the palette, press Tab over the canvas, or drop a wire on empty canvas to add a node that's already connected.
 - **The level meter and the Scope/Spectrum probe show engine output.** The host recomputes a node's signal offline at the session's current frame; it isn't tapped from the device stream. The meter follows what is playing; the probe follows the draft and says so when the draft isn't applied. The meter's ceiling is a warning threshold only, because the engine has no limiter.
-- **Low-pass cutoff modulation** uses the engine's fixed mapping (1 kHz ± 900 Hz at 48 kHz).
-- **The session runs at 48 kHz.** Devices that don't offer 48 kHz natively (some Bluetooth speakers run at 44.1 kHz) fail to start with a clear error until the host adopts the device-rate selection from #25.
+- **Low-pass cutoff modulation** uses the engine's fixed mapping (1 kHz ± 900 Hz at 44.1 and 48 kHz).
+- **The session runs at the default output's native rate.** The engine doesn't resample. The editor checks drafts against the rate the output had at launch; if the default output has changed when you press Play, the engine is rebuilt at the new rate and the draft is checked again, because limits like Nyquist move with it. The output isn't followed mid-session.
 - **Projects autosave** to local storage. Export `.sf` shows the DSL to run with `live_runtime`.

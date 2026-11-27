@@ -2,7 +2,7 @@
 //! `sonicfusion-host` with complete graphs; this crate never sees engine types.
 
 use std::sync::{
-    Arc,
+    Arc, RwLock,
     atomic::{AtomicU64, Ordering},
 };
 
@@ -11,12 +11,15 @@ use sonicfusion_graph_api::{
     GraphIssue, GraphSpec, LevelReading, NodeDescriptor, NodeId, ProbeWindow, RevisionStatus,
     SessionInfo, catalog as node_catalog,
 };
-use sonicfusion_host::{Engine, HostError, Session, SessionExit};
+use sonicfusion_host::{Engine, HostError, Session, SessionExit, default_output_rate};
 use tauri::{AppHandle, Builder, Emitter, Runtime, State};
 use tokio::sync::Mutex;
 
+const BATCH_FRAMES: usize = 1024;
+
 struct AppState {
-    engine: Engine,
+    /// Replaced when the default output's native rate changes between sessions.
+    engine: RwLock<Engine>,
     /// Commands clone the session out of the slot so long engine work (level,
     /// probe) never blocks start, stop or apply.
     session: Mutex<Option<Running>>,
@@ -35,6 +38,13 @@ struct RevisionEvent {
     session: u64,
     revision: u64,
     status: RevisionStatus,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct Started {
+    session: u64,
+    /// The settings the session runs with, which follow the output device.
+    info: SessionInfo,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -70,6 +80,11 @@ impl From<HostError> for CommandError {
                 message,
                 issues: Vec::new(),
             },
+            HostError::DeviceRate { .. } => Self {
+                kind: "engine",
+                message,
+                issues: Vec::new(),
+            },
         }
     }
 }
@@ -83,34 +98,45 @@ fn catalog() -> Vec<NodeDescriptor> {
 
 #[tauri::command]
 fn session_info(state: State<'_, AppState>) -> SessionInfo {
-    state.engine.info()
+    state.engine().info()
 }
 
 #[tauri::command]
 fn validate(state: State<'_, AppState>, graph: GraphSpec) -> Vec<GraphIssue> {
-    state.engine.validate(&graph)
+    state.engine().validate(&graph)
 }
 
 #[tauri::command]
 fn export_dsl(state: State<'_, AppState>, graph: GraphSpec) -> CommandResult<String> {
-    Ok(state.engine.lower(&graph)?.source)
+    Ok(state.engine().lower(&graph)?.source)
 }
 
 /// Replace any running session with one playing `graph` on the default
-/// device, and return the new session's id. An invalid graph leaves a running
-/// session alone.
+/// device at its native rate. An invalid graph leaves a running session alone.
 #[tauri::command]
 async fn start_session<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     graph: GraphSpec,
-) -> CommandResult<u64> {
-    state.engine.lower(&graph)?;
+) -> CommandResult<Started> {
+    // Refuse a broken draft before touching the device or a running session.
+    state.engine().lower(&graph)?;
     let mut slot = state.session.lock().await;
+    // The engine can only follow the device between sessions.
+    let device_hz = default_output_rate()?;
+    let engine = if device_hz == state.engine().info().sample_rate_hz {
+        state.engine()
+    } else {
+        // Limits such as Nyquist move with the rate, so check again.
+        let engine = Engine::with_settings(device_hz, BATCH_FRAMES)?;
+        engine.lower(&graph)?;
+        *state.engine.write().unwrap() = engine.clone();
+        engine
+    };
     if let Some(previous) = slot.take() {
         previous.session.stop().await;
     }
-    let session = Arc::new(Session::start_device(&state.engine, &graph)?);
+    let session = Arc::new(Session::start_device(&engine, &graph)?);
     let id = state.next_session.fetch_add(1, Ordering::Relaxed) + 1;
     let exited = session.exited();
     *slot = Some(Running { id, session });
@@ -127,7 +153,10 @@ async fn start_session<R: Runtime>(
             );
         }
     });
-    Ok(id)
+    Ok(Started {
+        session: id,
+        info: engine.info(),
+    })
 }
 
 #[tauri::command]
@@ -173,14 +202,12 @@ async fn probe(
         .await
         .map_or(0, |running| running.session.next_output_frame());
     let node = NodeId::new(node);
-    let samples = state
-        .engine
-        .probe(&graph, &node, start_frame, frames)
-        .await?;
+    let engine = state.engine();
+    let samples = engine.probe(&graph, &node, start_frame, frames).await?;
     Ok(ProbeWindow {
         node,
         start_frame,
-        sample_rate_hz: state.engine.info().sample_rate_hz,
+        sample_rate_hz: engine.info().sample_rate_hz,
         samples,
     })
 }
@@ -202,9 +229,19 @@ async fn current(state: &AppState) -> Option<Running> {
     state.session.lock().await.clone()
 }
 
+impl AppState {
+    fn engine(&self) -> Engine {
+        self.engine.read().unwrap().clone()
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let engine = Engine::new().expect("cannot start the SonicFusion engine host");
+    // Validate against the default output's rate from the start; without a
+    // usable device the editor still works, and Play reports why.
+    let rate = default_output_rate().unwrap_or(48_000);
+    let engine = Engine::with_settings(rate, BATCH_FRAMES)
+        .expect("cannot start the SonicFusion engine host");
     with_engine(tauri::Builder::default(), engine)
         .run(tauri::generate_context!())
         .expect("error while running the SonicFusion editor");
@@ -213,7 +250,7 @@ pub fn run() {
 fn with_engine<R: Runtime>(builder: Builder<R>, engine: Engine) -> Builder<R> {
     builder
         .manage(AppState {
-            engine,
+            engine: RwLock::new(engine),
             session: Mutex::new(None),
             next_session: AtomicU64::new(0),
         })

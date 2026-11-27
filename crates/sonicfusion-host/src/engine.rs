@@ -27,6 +27,21 @@ pub enum HostError {
     Engine(String),
     #[error("no session is running")]
     NoSession,
+    /// The default output's native rate isn't the engine's; build an engine
+    /// at `device_hz` (see [`default_output_rate`]) to play on it.
+    #[error(
+        "the default output runs at {device_hz} Hz, but the session is set up for {session_hz} Hz"
+    )]
+    DeviceRate { device_hz: u32, session_hz: u32 },
+}
+
+/// The native rate of the current default output device, which a session on
+/// it must use. The engine doesn't resample.
+#[cfg(feature = "audio-device")]
+pub fn default_output_rate() -> Result<u32, HostError> {
+    sonicfusion::device::DeviceOutput::default_device()
+        .map(|output| output.sample_rate_hz())
+        .map_err(|error| HostError::Engine(error.to_string()))
 }
 
 fn invalid_summary(issues: &[GraphIssue]) -> String {
@@ -63,7 +78,8 @@ impl Drop for Inner {
 }
 
 impl Engine {
-    /// The session settings used by `live_runtime`: 48 kHz, 1024-frame batches.
+    /// 48 kHz with 1024-frame batches. To play on a device, prefer
+    /// [`Engine::with_settings`] at [`default_output_rate`].
     pub fn new() -> Result<Self, HostError> {
         Self::with_settings(48_000, 1024)
     }

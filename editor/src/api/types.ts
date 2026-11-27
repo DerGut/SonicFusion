@@ -100,6 +100,12 @@ export interface RevisionEvent extends RevisionUpdate {
   session: number;
 }
 
+/** A started session and the settings it runs with (they follow the device). */
+export interface Started {
+  session: number;
+  info: SessionInfo;
+}
+
 export interface SessionEnded {
   session: number;
   message: string;

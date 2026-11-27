@@ -11,6 +11,7 @@ import type {
   RevisionEvent,
   SessionEnded,
   SessionInfo,
+  Started,
 } from "./types";
 
 export class TauriEngine implements EngineClient {
@@ -34,7 +35,7 @@ export class TauriEngine implements EngineClient {
   }
 
   startSession(graph: GraphSpec) {
-    return invoke<number>("start_session", { graph });
+    return invoke<Started>("start_session", { graph });
   }
 
   stopSession() {

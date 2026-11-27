@@ -45,6 +45,7 @@ The Tauri crate must not depend on `sonicfusion`. Every engine interaction goes 
 - **Fan-out:** fan-out of any node is allowed. Each consumer re-executes its input, which is equivalent because every node is deterministic from the session origin.
 - **Session:** `EngineSession` owns the `SynthRuntime` and its `RuntimeControl`.
   - The default device runs on a dedicated thread with a current-thread Tokio runtime, because CPAL streams are not `Send`. Tests inject a `PacedOutput`.
+  - The device is selected with `DeviceOutput::default_device()` (#25) before playback starts, so a session runs at the output's native rate; `default_output_rate()` lets the shell build its engine at that rate.
   - `apply(graph)` validates, lowers and calls `submit_replacement`, then forwards events as `RevisionStatus` through a callback.
   - On `Applied`, the session records that revision's graph as the active graph.
 - **Probe:** `probe(graph, node, start_frame, frames)` renders the node's ancestor sub-graph offline from the live plan at that frame, after a short warm-up so filter state settles. `level()` probes the active graph's output at the session's next output frame and returns its peak in dBFS. Both are real engine output, recomputed rather than tapped from the device stream.

@@ -9,6 +9,8 @@ mod engine;
 mod lower;
 mod session;
 
+#[cfg(feature = "audio-device")]
+pub use engine::default_output_rate;
 pub use engine::{Engine, HostError};
 pub use lower::{Lowered, lower};
 pub use session::{Session, SessionExit};

@@ -38,25 +38,46 @@ struct Active {
 }
 
 impl Session {
-    /// Play `graph` on the default output device. Device errors surface
-    /// asynchronously through [`Session::exit`] and [`Session::wait`].
+    /// Play `graph` on the default output device. The device is selected
+    /// first, so a missing device or one whose native rate differs from the
+    /// engine's fails here with [`HostError::DeviceRate`]; later device errors
+    /// surface through [`Session::exit`] and [`Session::wait`].
     #[cfg(feature = "audio-device")]
     pub fn start_device(engine: &Engine, graph: &GraphSpec) -> Result<Self, HostError> {
         let runtime = start_runtime(engine, graph)?;
         let control = runtime.control();
+        let session_hz = engine.info().sample_rate_hz;
         let (report, exit) = watch::channel(None);
+        let (selected, selection) = std::sync::mpsc::sync_channel(1);
         // CPAL streams aren't `Send`, so playback owns a thread and a
         // current-thread executor; edits only touch the cloneable control.
         std::thread::Builder::new()
             .name("sonicfusion-playback".into())
             .spawn(move || {
+                let output = match sonicfusion::device::DeviceOutput::default_device() {
+                    Ok(output) if output.sample_rate_hz() == session_hz => {
+                        let _ = selected.send(Ok(()));
+                        output
+                    }
+                    Ok(output) => {
+                        let _ = selected.send(Err(HostError::DeviceRate {
+                            device_hz: output.sample_rate_hz(),
+                            session_hz,
+                        }));
+                        return;
+                    }
+                    Err(error) => {
+                        let _ = selected.send(Err(HostError::Engine(error.to_string())));
+                        return;
+                    }
+                };
                 let result = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|error| format!("cannot start playback runtime: {error}"))
                     .and_then(|executor| {
                         executor
-                            .block_on(sonicfusion::device::play_default_device(runtime))
+                            .block_on(output.play(runtime))
                             .map_err(|error| error.to_string())
                     });
                 report.send_replace(Some(match result {
@@ -65,6 +86,9 @@ impl Session {
                 }));
             })
             .map_err(|error| HostError::Engine(format!("cannot start playback: {error}")))?;
+        selection.recv().map_err(|_| {
+            HostError::Engine("playback thread ended before selecting a device".into())
+        })??;
         Ok(Self::new(engine, control, graph, exit))
     }
 

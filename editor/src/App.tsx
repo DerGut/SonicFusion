@@ -85,8 +85,10 @@ class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-function Editor({ client, catalog, session }: { client: EngineClient; catalog: Catalog; session: SessionInfo }) {
+function Editor({ client, catalog, session: initialSession }: { client: EngineClient; catalog: Catalog; session: SessionInfo }) {
   const flow = useReactFlow<SfNode, SfEdge>();
+  // Sample rate and limits follow the output device each time playback starts.
+  const [session, setSession] = useState(initialSession);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
     doc: loadDocument() ?? studioDocument(studioPatch as GraphSpec),
     past: [],
@@ -99,32 +101,35 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
 
   // Issues belong to the graph they were computed for, so a stale "no errors"
   // can never let an unchecked draft through.
-  const [checked, setChecked] = useState<{ json: string; issues: GraphIssue[] } | null>(null);
+  const [checked, setChecked] = useState<{ json: string; session: SessionInfo; issues: GraphIssue[] } | null>(null);
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
       client
         .validate(graph)
-        .then((issues) => !cancelled && setChecked({ json: graphJson, issues }))
+        .then((issues) => !cancelled && setChecked({ json: graphJson, session, issues }))
         .catch((reason) => {
           if (cancelled) return;
           const issue: GraphIssue = { severity: "error", code: "engine_rejected", node: null, port: null, param: null, message: `couldn't check the graph: ${describe(reason)}` };
-          setChecked({ json: graphJson, issues: [issue] });
+          setChecked({ json: graphJson, session, issues: [issue] });
         });
     }, VALIDATE_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [client, graph, graphJson]);
-  const current = checked?.json === graphJson;
+  }, [client, graph, graphJson, session]);
+  const current = checked?.json === graphJson && checked.session === session;
   const issues = checked?.issues ?? [];
 
   const [autoApply, setAutoApply] = useStored("sonicfusion.autoApply", true);
   const [ceilingDb, setCeilingDb] = useStored("sonicfusion.ceilingDb", -6);
   const allIssues = issues;
   const hasErrors = issues.some((issue) => issue.severity === "error");
-  const engine = useEngineSession(client, graph, current && !hasErrors, autoApply);
+  const updateSession = useCallback((info: SessionInfo) => {
+    setSession((previous) => (JSON.stringify(previous) === JSON.stringify(info) ? previous : info));
+  }, []);
+  const engine = useEngineSession(client, graph, current && !hasErrors, autoApply, updateSession);
   const shownIssues = useMemo(() => [...allIssues, ...engine.engineIssues], [allIssues, engine.engineIssues]);
   const errorCount = shownIssues.filter((issue) => issue.severity === "error").length;
   const [selected, setSelected] = useState<Set<string>>(new Set());

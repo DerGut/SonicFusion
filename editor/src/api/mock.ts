@@ -59,7 +59,7 @@ export class MockEngine implements EngineClient {
     this.playing = graph;
     this.revision = 0;
     this.startedAt = performance.now();
-    return ++this.session;
+    return { session: ++this.session, info: INFO };
   }
 
   async stopSession() {

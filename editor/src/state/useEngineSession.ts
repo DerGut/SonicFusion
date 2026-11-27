@@ -6,6 +6,7 @@ import {
   type GraphSpec,
   type LevelReading,
   type RevisionStatus,
+  type SessionInfo,
   isCommandError,
 } from "../api/types";
 
@@ -29,7 +30,14 @@ const LEVEL_FRAMES = 1024;
  * nothing is submitted unless `canSubmit` says the current draft was checked
  * and has no errors.
  */
-export function useEngineSession(client: EngineClient, draft: GraphSpec, canSubmit: boolean, autoApply: boolean) {
+export function useEngineSession(
+  client: EngineClient,
+  draft: GraphSpec,
+  canSubmit: boolean,
+  autoApply: boolean,
+  /** Called with the settings a start ended up with; they follow the device. */
+  onSessionInfo: (info: SessionInfo) => void,
+) {
   const [playback, setPlayback] = useState<Playback>({ state: "idle" });
   const [latest, setLatest] = useState<RevisionInfo | null>(null);
   /** A submission the host refused before it got a revision. */
@@ -72,7 +80,8 @@ export function useEngineSession(client: EngineClient, draft: GraphSpec, canSubm
     setPlayback({ state: "starting" });
     setRefused(null);
     try {
-      const id = await client.startSession(draft);
+      const { session: id, info } = await client.startSession(draft);
+      onSessionInfo(info);
       session.current = id;
       submitted.current.clear();
       appliedEarly.current.clear();
@@ -83,8 +92,10 @@ export function useEngineSession(client: EngineClient, draft: GraphSpec, canSubm
     } catch (error) {
       setPlayback({ state: "failed", message: describe(error) });
       if (isCommandError(error)) setRefused({ json: draftJson, message: describe(error), issues: error.issues });
+      // A failed start may still have moved the engine to a new device rate.
+      client.sessionInfo().then(onSessionInfo).catch(() => {});
     }
-  }, [client, draft, draftJson]);
+  }, [client, draft, draftJson, onSessionInfo]);
 
   const stop = useCallback(async () => {
     session.current = null;

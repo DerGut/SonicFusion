@@ -7,6 +7,7 @@ import type {
   RevisionEvent,
   SessionEnded,
   SessionInfo,
+  Started,
 } from "./types";
 
 /**
@@ -22,8 +23,8 @@ export interface EngineClient {
   sessionInfo(): Promise<SessionInfo>;
   validate(graph: GraphSpec): Promise<GraphIssue[]>;
   exportDsl(graph: GraphSpec): Promise<string>;
-  /** Resolves with the new session's id. */
-  startSession(graph: GraphSpec): Promise<number>;
+  /** Play `graph` on the default output at its native rate. */
+  startSession(graph: GraphSpec): Promise<Started>;
   stopSession(): Promise<void>;
   /** Resolves with the revision once the graph passed validation. */
   applyGraph(graph: GraphSpec): Promise<number>;
