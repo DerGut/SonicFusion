@@ -231,6 +231,20 @@ export function PatchUnitToggle() {
   );
 }
 
+/** Readouts share a row with the label; full precision lives in the popover and the typed value. */
+function compactPitch(pitch: { midi: number; cents: number }): string {
+  const cents = Math.round(pitch.cents);
+  return noteName(pitch.midi) + (cents === 0 ? "" : ` ${cents > 0 ? "+" : "−"}${Math.abs(cents)}¢`);
+}
+function compactHz(hz: number): string {
+  // U+202F keeps the unit attached and narrow.
+  return hz < 1000 ? `${Number(hz.toPrecision(3))}\u202FHz` : `${Number((hz / 1000).toPrecision(3))}\u202FkHz`;
+}
+/** Hz-led rows only hint at the note; the exact detune is one swap away. */
+function nearestNote(pitch: { midi: number; cents: number }): string {
+  return (Math.abs(pitch.cents) < 0.5 ? "" : "≈") + noteName(pitch.midi);
+}
+
 const PITCH_FLOOR_HZ = 20;
 const isPitch = (hz: number) => hz >= PITCH_FLOOR_HZ;
 
@@ -297,10 +311,10 @@ export function PrototypeFrequency({ id, nodeId, modulator, descriptor, value, i
   const nodeUnit = override ?? roleUnit;
   const notePrimary = variant === "D" ? nodeUnit === "note" && pitch !== null : variant === "C" || unit === "note";
 
-  const primary = pitch && notePrimary ? formatPitch(pitch) : formatHz(value);
+  const primary = pitch && notePrimary ? compactPitch(pitch) : formatHz(value);
   const rate = !pitch;
   const secondary = variant === "D" && rate ? "rate"
-    : pitch ? (notePrimary ? formatHz(value) : formatPitch(pitch)) : variant === "B" && unit === "note" ? "rate" : null;
+    : pitch ? (notePrimary ? compactHz(value) : nearestNote(pitch)) : variant === "B" && unit === "note" ? "rate" : null;
   const commit = () => {
     if (typing !== null && typing.trim() !== "") {
       const parsed = parseFrequency(typing);
@@ -320,7 +334,8 @@ export function PrototypeFrequency({ id, nodeId, modulator, descriptor, value, i
   return (
     <div className={`param proto-freq${invalid ? " invalid" : ""}`} title={invalid}>
       <div className="param-top">
-        <label htmlFor={id}>{descriptor.label}</label>
+        {/* A note-led oscillator row reads as pitch; the shorter label leaves room for both units. */}
+        <label htmlFor={id}>{variant === "D" && notePrimary && descriptor.name === "frequency_hz" ? "Pitch" : descriptor.label}</label>
         {typing === null && variant === "D" ? (
           <span className="proto-dual">
             <button type="button" className="value nodrag"

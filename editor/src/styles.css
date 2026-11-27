@@ -312,3 +312,8 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .proto-swap:hover { background: var(--raised); color: var(--text-2); }
 .proto-swap.overridden { text-decoration: underline dotted; }
 .proto-dual, .proto-swap { white-space: nowrap; }
+.proto-freq .param-top { gap: 6px; }
+.proto-freq .param-top label { flex: none; }
+.proto-dual { min-width: 0; gap: 4px; }
+.proto-dual > .value { flex: none; }
+.proto-dual .proto-secondary { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
