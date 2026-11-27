@@ -9,6 +9,8 @@ export function triggerIndex(samples: number[], searchUpTo: number): number {
   return 0;
 }
 
+const SPECTRUM_FLOOR_DB = -180;
+
 /**
  * Magnitude spectrum in dBFS for a power-of-two window, Hann-weighted and
  * normalized so a full-scale sine reads about 0 dB. Bin `k` is
@@ -21,10 +23,12 @@ export function spectrumDb(samples: number[]): number[] {
   }
   const real = new Float64Array(size);
   const imag = new Float64Array(size);
+  // Remove the DC component before windowing so a steady value has no AC peak.
+  const mean = samples.reduce((sum, sample) => sum + sample, 0) / size;
   let windowSum = 0;
   for (let index = 0; index < size; index++) {
     const hann = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / (size - 1));
-    real[index] = samples[index] * hann;
+    real[index] = (samples[index] - mean) * hann;
     windowSum += hann;
   }
   fft(real, imag);
@@ -32,7 +36,7 @@ export function spectrumDb(samples: number[]): number[] {
   const result = new Array<number>(bins);
   for (let bin = 0; bin < bins; bin++) {
     const magnitude = (2 * Math.hypot(real[bin], imag[bin])) / windowSum;
-    result[bin] = magnitude > 1e-9 ? 20 * Math.log10(magnitude) : -180;
+    result[bin] = magnitude > 1e-9 ? 20 * Math.log10(magnitude) : SPECTRUM_FLOOR_DB;
   }
   return result;
 }
@@ -66,6 +70,28 @@ function fft(real: Float64Array, imag: Float64Array) {
       }
     }
   }
+}
+
+/** Estimate the strongest AC component between FFT bins in a Hann window. */
+export function strongestPartialHz(spectrum: number[], rate: number): number | null {
+  let peakBin = 0;
+  let peakDb = SPECTRUM_FLOOR_DB;
+  for (let bin = 1; bin < spectrum.length; bin++) {
+    if (spectrum[bin] > peakDb) {
+      peakBin = bin;
+      peakDb = spectrum[bin];
+    }
+  }
+  if (peakBin === 0) return null;
+  let correction = 0;
+  // A DC bin is not a usable neighbor, even if the strongest AC bin is bin 1.
+  if (peakBin > 1 && peakBin + 1 < spectrum.length) {
+    const left = spectrum[peakBin - 1];
+    const right = spectrum[peakBin + 1];
+    const curvature = left - 2 * peakDb + right;
+    if (curvature < 0) correction = 0.5 * (left - right) / curvature;
+  }
+  return ((peakBin + correction) * rate) / (2 * spectrum.length);
 }
 
 export function formatHz(hz: number): string {

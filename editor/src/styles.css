@@ -163,12 +163,20 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
 .param { height: 52px; padding: 7px 12px 0 14px; display: flex; flex-direction: column; gap: 8px; }
 .param-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; color: var(--text-2); }
+.param-label { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.frequency-mode {
+  border: 1px solid var(--edge); border-radius: 4px; padding: 0;
+  background: var(--raised); color: var(--muted); font: inherit; font-size: 10px; cursor: pointer;
+}
+.param-top .value-input { min-width: 0; }
 .param .value, .meter .value {
   border: 0; padding: 0; background: transparent; font-family: var(--mono); font-size: 11.5px; color: var(--text); cursor: text;
 }
 .param.invalid .value, .param.invalid label { color: var(--error-soft); }
 .value-input { width: 86px; height: 20px; padding: 0 4px; border: 1px solid var(--control); border-radius: 4px; background: #0f1216; font-family: var(--mono); font-size: 11.5px; text-align: right; }
+.param.modulated { height: auto; min-height: 52px; gap: 4px; padding-bottom: 6px; }
 .param.modulated .param-top, .param.modulated .value { color: var(--control-soft); }
+.param.modulated .value { cursor: inherit; }
 .param-note { margin: 0; font-size: 11px; color: var(--muted); }
 .range { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 4px; margin: 0; border-radius: 2px; background: var(--track); cursor: ew-resize; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); box-shadow: 0 0 0 1px #4a5361; }
@@ -246,7 +254,7 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .readouts { width: 220px; flex: none; margin: 0; display: flex; flex-direction: column; gap: 9px; padding-top: 4px; }
 .readouts div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
 .readouts dt { color: var(--muted); }
-.readouts dd { margin: 0; font-family: var(--mono); font-size: 11.5px; }
+.readouts dd { margin: 0; font-family: var(--mono); font-size: 11.5px; text-align: right; }
 
 /* Status bar */
 .statusbar {
