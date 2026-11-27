@@ -191,6 +191,10 @@ fn log_replacement_event(revision: u64, event: ReplacementEvent) {
             format!("superseded by revision {by_revision}")
         }
         ReplacementEvent::PreparationRejected { error } => format!("edit rejected: {error}"),
+        #[cfg(feature = "substrait-spike")]
+        ReplacementEvent::SubstraitPreparationRejected { error } => {
+            format!("edit rejected: {error}")
+        }
         ReplacementEvent::ActivationRejected { frame, error } => {
             format!("activation rejected at graph frame {frame}: {error}")
         }
