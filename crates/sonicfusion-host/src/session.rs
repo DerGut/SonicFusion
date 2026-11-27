@@ -26,8 +26,15 @@ pub enum SessionExit {
 pub struct Session {
     engine: Engine,
     control: RuntimeControl,
-    active: Arc<Mutex<GraphSpec>>,
+    active: Arc<Mutex<Active>>,
     exit: watch::Receiver<Option<SessionExit>>,
+}
+
+/// The circuit that is executing and where it started from fresh state.
+struct Active {
+    revision: u64,
+    graph: GraphSpec,
+    since_frame: u64,
 }
 
 impl Session {
@@ -73,6 +80,15 @@ impl Session {
             return Err(HostError::NoSession);
         }
         let lowered = self.engine.lower(graph)?;
+        Ok(self.submit(graph, lowered, on_update))
+    }
+
+    fn submit(
+        &self,
+        graph: &GraphSpec,
+        lowered: Lowered,
+        on_update: impl Fn(RevisionUpdate) + Send + 'static,
+    ) -> u64 {
         let mut request = {
             // Preparation runs on the host's blocking pool.
             let _context = self.engine.runtime().enter();
@@ -88,18 +104,26 @@ impl Session {
         self.engine.runtime().spawn(async move {
             while let Some(event) = request.next_event().await {
                 let status = revision_status(event, &lowered);
-                if matches!(status, RevisionStatus::Applied { .. }) {
-                    *active.lock().unwrap() = graph.clone();
+                if let RevisionStatus::Applied { frame } = status {
+                    // Forwarding tasks can finish out of order; keep the newest.
+                    let mut active = active.lock().unwrap();
+                    if revision > active.revision {
+                        *active = Active {
+                            revision,
+                            graph: graph.clone(),
+                            since_frame: frame,
+                        };
+                    }
                 }
                 on_update(RevisionUpdate { revision, status });
             }
         });
-        Ok(revision)
+        revision
     }
 
     /// The most recently applied graph (initially the one the session started with).
     pub fn active_graph(&self) -> GraphSpec {
-        self.active.lock().unwrap().clone()
+        self.active.lock().unwrap().graph.clone()
     }
 
     /// First graph frame not yet admitted to output; ahead of what is audible.
@@ -108,13 +132,20 @@ impl Session {
     }
 
     /// Peak of the active circuit's output over `frames` frames from the next
-    /// output frame, recomputed offline rather than tapped from playback.
+    /// output frame, recomputed offline rather than tapped from playback. It
+    /// replays history only back to where that circuit started.
     pub async fn level(&self, frames: usize) -> Result<LevelReading, HostError> {
-        let graph = self.active_graph();
+        if self.exit().is_some() {
+            return Err(HostError::NoSession);
+        }
+        let (graph, since) = {
+            let active = self.active.lock().unwrap();
+            (active.graph.clone(), active.since_frame)
+        };
         let frame = self.next_output_frame();
         let samples = self
             .engine
-            .probe(&graph, &output_id(&graph)?, frame, frames)
+            .probe_since(&graph, &output_id(&graph)?, frame, frames, since)
             .await?;
         let peak = samples
             .iter()
@@ -148,11 +179,12 @@ impl Session {
     }
 
     /// Stop playback; queued audio is discarded.
-    pub async fn stop(self) -> SessionExit {
+    pub async fn stop(&self) -> SessionExit {
         self.control.stop();
         self.wait().await
     }
 
+    #[cfg_attr(not(feature = "audio-device"), allow(dead_code))]
     fn new(
         engine: &Engine,
         control: RuntimeControl,
@@ -162,7 +194,11 @@ impl Session {
         Self {
             engine: engine.clone(),
             control,
-            active: Arc::new(Mutex::new(graph.clone())),
+            active: Arc::new(Mutex::new(Active {
+                revision: 0,
+                graph: graph.clone(),
+                since_frame: 0,
+            })),
             exit,
         }
     }
@@ -174,29 +210,55 @@ impl Drop for Session {
     }
 }
 
+#[cfg_attr(not(feature = "audio-device"), allow(dead_code))]
 fn start_runtime(engine: &Engine, graph: &GraphSpec) -> Result<SynthRuntime, HostError> {
     let lowered = engine.lower(graph)?;
     let config = engine.config();
     let _context = engine.runtime().enter();
-    let plan =
-        build_live_plan(&lowered.source, &config).map_err(|error| rejected(&error, &lowered))?;
+    let plan = build_live_plan(&lowered.source, &config)
+        .map_err(|error| HostError::Invalid(engine_issues(&error, &lowered)))?;
     SynthRuntime::start(plan, config).map_err(|error| HostError::Engine(error.to_string()))
 }
 
-fn rejected(error: &DslError, lowered: &Lowered) -> HostError {
-    HostError::Invalid(engine_issues(error, lowered))
-}
-
+/// Attribute an engine rejection to a node and phrase it without the DSL's
+/// line numbers or internal `$n<k>` bindings.
 fn engine_issues(error: &DslError, lowered: &Lowered) -> Vec<GraphIssue> {
-    let node = match error {
-        DslError::Source { line, .. } => lowered.node_at_line(*line),
-        DslError::Plan(_) => None,
+    let (node, message) = match error {
+        DslError::Source { line, message, .. } => (lowered.node_at_line(*line), message.clone()),
+        DslError::Plan(error) => (None, error.message().to_string()),
     };
     vec![GraphIssue::error(
         IssueCode::EngineRejected,
         node,
-        error.to_string(),
+        format!(
+            "the engine refused this graph: {}",
+            with_node_names(&message, lowered)
+        ),
     )]
+}
+
+/// Replace `$n<k>` bindings with the ids of the nodes they stand for.
+fn with_node_names(message: &str, lowered: &Lowered) -> String {
+    let mut named = String::with_capacity(message.len());
+    let mut rest = message;
+    while let Some(at) = rest.find("$n") {
+        named.push_str(&rest[..at]);
+        let digits: String = rest[at + 2..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        match digits
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| lowered.lines.get(index))
+        {
+            Some(node) if !digits.is_empty() => named.push_str(&node.0),
+            _ => named.push_str(&rest[at..at + 2 + digits.len()]),
+        }
+        rest = &rest[at + 2 + digits.len()..];
+    }
+    named.push_str(rest);
+    named
 }
 
 fn revision_status(event: ReplacementEvent, lowered: &Lowered) -> RevisionStatus {
@@ -204,10 +266,13 @@ fn revision_status(event: ReplacementEvent, lowered: &Lowered) -> RevisionStatus
     match event {
         ReplacementEvent::Accepted => RevisionStatus::Accepted,
         ReplacementEvent::Superseded { by_revision } => RevisionStatus::Superseded { by_revision },
-        ReplacementEvent::PreparationRejected { error } => RevisionStatus::Rejected {
-            message: error.to_string(),
-            issues: engine_issues(&error, lowered),
-        },
+        ReplacementEvent::PreparationRejected { error } => {
+            let issues = engine_issues(&error, lowered);
+            RevisionStatus::Rejected {
+                message: issues[0].message.clone(),
+                issues,
+            }
+        }
         ReplacementEvent::Scheduled { frame } => RevisionStatus::Scheduled { frame },
         ReplacementEvent::ActivationRejected { frame, error } => {
             RevisionStatus::ActivationRejected {
@@ -230,7 +295,7 @@ fn revision_status(event: ReplacementEvent, lowered: &Lowered) -> RevisionStatus
 mod tests {
     use std::{num::NonZeroUsize, time::Duration};
 
-    use sonicfusion::{AudioChunk, ExecutionConfig, runtime::PacedOutput};
+    use sonicfusion::{AudioChunk, runtime::PacedOutput};
     use sonicfusion_graph_api::{NodeId, NodeKind, NodeSpec, PortRef, Wire};
     use tokio::{sync::mpsc, time::timeout};
 
@@ -343,7 +408,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn edit_insert_and_reject_without_restarting() {
-        let engine = Engine::with_config(ExecutionConfig::new(48_000, 64).unwrap()).unwrap();
+        let engine = Engine::with_settings(48_000, 64).unwrap();
         let (sender, mut chunks) = mpsc::unbounded_channel();
         let output = ChannelOutput {
             chunks: sender,
@@ -407,7 +472,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn engine_rejections_keep_the_previous_circuit() {
-        let engine = Engine::with_config(ExecutionConfig::new(48_000, 64).unwrap()).unwrap();
+        let engine = Engine::with_settings(48_000, 64).unwrap();
         let (sender, mut chunks) = mpsc::unbounded_channel();
         let output = ChannelOutput {
             chunks: sender,
@@ -416,24 +481,78 @@ mod tests {
         let session = Session::start_with_output(&engine, &osc_gain_out(0.25), output).unwrap();
         wait_for_sample(&mut chunks, 0.25).await;
 
-        // A factor beyond f32 passes the shared limits check only if the
-        // engine is stricter; simulate an engine-side rejection directly.
-        let lowered = engine.lower(&osc_gain_out(0.5)).unwrap();
-        let status = revision_status(
-            ReplacementEvent::PreparationRejected {
-                error: DslError::Source {
-                    line: 2,
-                    column: 1,
-                    message: "boom".into(),
-                },
-            },
-            &lowered,
-        );
-        let RevisionStatus::Rejected { issues, .. } = status else {
-            panic!("expected a rejection");
+        // Bypass host validation to hit the engine's own rejection path.
+        let graph = osc_gain_out(0.5);
+        let mut lowered = engine.lower(&graph).unwrap();
+        lowered.source = lowered
+            .source
+            .replace("gain($n0, 0.5)", "gain($n0, 0.5, $n7)");
+        let (updates_tx, mut updates) = mpsc::unbounded_channel();
+        session.submit(&graph, lowered, move |update| {
+            let _ = updates_tx.send(update);
+        });
+        let statuses = final_status(&mut updates).await;
+        let Some(RevisionStatus::Rejected { issues, message }) = statuses.last() else {
+            panic!("expected a rejection: {statuses:?}");
         };
         assert_eq!(issues[0].node, Some(NodeId::new("gain")));
+        assert!(!message.contains("line"), "{message}");
+        assert!(!message.contains("$n"), "{message}");
         assert_eq!(session.active_graph(), osc_gain_out(0.25));
-        drop(session);
+        // Live output after the rejection still comes from the old circuit.
+        for _ in 0..3 {
+            let chunk = chunks.recv().await.unwrap();
+            assert!(chunk.samples().iter().all(|sample| *sample == 0.25));
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rapid_applies_end_on_the_newest_revision() {
+        let engine = Engine::with_settings(48_000, 64).unwrap();
+        let (sender, mut chunks) = mpsc::unbounded_channel();
+        let output = ChannelOutput {
+            chunks: sender,
+            batch: NonZeroUsize::new(64).unwrap(),
+        };
+        let session = Session::start_with_output(&engine, &osc_gain_out(0.25), output).unwrap();
+        wait_for_sample(&mut chunks, 0.25).await;
+        let (updates_tx, mut updates) = mpsc::unbounded_channel();
+        let mut last = 0;
+        for factor in [0.3, 0.4, 0.5, 0.6, 0.75] {
+            let tx = updates_tx.clone();
+            last = session
+                .apply(&osc_gain_out(factor), move |update| {
+                    let _ = tx.send(update);
+                })
+                .unwrap();
+        }
+        drop(updates_tx);
+        let mut applied = Vec::new();
+        while let Some(update) = timeout(Duration::from_secs(5), updates.recv())
+            .await
+            .unwrap()
+        {
+            if matches!(update.status, RevisionStatus::Applied { .. }) {
+                applied.push(update.revision);
+            }
+        }
+        assert!(
+            applied.contains(&last),
+            "newest revision applied: {applied:?}"
+        );
+        assert_eq!(session.active_graph(), osc_gain_out(0.75));
+        wait_for_sample(&mut chunks, 0.75).await;
+    }
+
+    #[test]
+    fn engine_messages_use_node_ids() {
+        let lowered = Lowered {
+            source: String::new(),
+            lines: vec![NodeId::new("osc"), NodeId::new("gain")],
+        };
+        assert_eq!(
+            with_node_names("unknown reference $n1 near $n12 and $nx", &lowered),
+            "unknown reference gain near $n12 and $nx"
+        );
     }
 }

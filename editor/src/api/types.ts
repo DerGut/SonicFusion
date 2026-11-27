@@ -95,6 +95,16 @@ export interface RevisionUpdate {
   status: RevisionStatus;
 }
 
+/** Revision numbers restart per session, so events name their session. */
+export interface RevisionEvent extends RevisionUpdate {
+  session: number;
+}
+
+export interface SessionEnded {
+  session: number;
+  message: string;
+}
+
 export interface SessionInfo {
   sample_rate_hz: number;
   batch_frames: number;

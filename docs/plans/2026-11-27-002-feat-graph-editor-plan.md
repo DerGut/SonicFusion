@@ -32,7 +32,9 @@ The Tauri crate must not depend on `sonicfusion`. Every engine interaction goes 
 - `catalog()` describes kinds, ports (audio or control, optional or required) and parameters (unit, range, default, log or linear scale). The UI renders from it.
 - `validate(&GraphSpec) -> Vec<GraphIssue>` covers structure only. Each issue has a code, a node, a port and a message.
   - Errors: duplicate or empty ids, a wire to an unknown node or port, two wires into one input, a missing required input, zero or multiple outputs, a cycle, a non-finite or out-of-range parameter.
-  - Warning: a node that doesn't reach the output; it isn't lowered.
+  - Warnings: a node that doesn't reach the output (it isn't lowered, so its own problems are warnings too), and wires the engine won't use.
+  - Size limits: chains up to 256 nodes deep (deeper plans overflow the stack when polled), and at most 256 node executions per circuit, because each consumer re-executes a shared node.
+  - `validate_upstream` applies the same rules relative to a probed node.
 - `RevisionStatus` mirrors `runtime::ReplacementEvent`: submitted, accepted, superseded, rejected (with an optional node), scheduled, applied, activation-rejected, run-closed.
 - `SessionInfo` holds the sample rate, batch size and the engine's fixed LPF modulation mapping.
 

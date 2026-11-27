@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EditorDocument } from "../model/document";
-import { historyReducer } from "./history";
+import { type History, historyReducer } from "./history";
 
 const doc = (name: string): EditorDocument => ({
   format: "sonicfusion-editor",
@@ -11,9 +11,11 @@ const doc = (name: string): EditorDocument => ({
   wires: [],
 });
 
+const start = (): History => ({ doc: doc("a"), past: [], future: [] });
+
 describe("history", () => {
   it("undoes and redoes recorded edits", () => {
-    let state = historyReducer({ doc: doc("a"), past: [], future: [] }, { type: "edit", change: () => doc("b") });
+    let state = historyReducer(start(), { type: "edit", change: () => doc("b") });
     state = historyReducer(state, { type: "edit", change: () => doc("c") });
     state = historyReducer(state, { type: "undo" });
     expect(state.doc.name).toBe("b");
@@ -22,7 +24,7 @@ describe("history", () => {
   });
 
   it("groups continuous edits behind one checkpoint", () => {
-    let state = historyReducer({ doc: doc("a"), past: [], future: [] }, { type: "checkpoint" });
+    let state = historyReducer(start(), { type: "checkpoint" });
     for (const name of ["b", "c", "d"]) {
       state = historyReducer(state, { type: "edit", change: () => doc(name), record: false });
     }
@@ -30,8 +32,17 @@ describe("history", () => {
     expect(historyReducer(state, { type: "undo" }).doc.name).toBe("a");
   });
 
+  it("doesn't record checkpoints that change nothing", () => {
+    let state = historyReducer(start(), { type: "edit", change: () => doc("b") });
+    state = historyReducer(state, { type: "undo" });
+    state = historyReducer(state, { type: "checkpoint" });
+    state = historyReducer(state, { type: "checkpoint" });
+    expect(state.past.length).toBe(0);
+    expect(state.future.length).toBe(1);
+  });
+
   it("ignores edits that change nothing", () => {
-    const start = { doc: doc("a"), past: [], future: [] };
-    expect(historyReducer(start, { type: "edit", change: (same) => same })).toBe(start);
+    const initial = start();
+    expect(historyReducer(initial, { type: "edit", change: (same) => same })).toBe(initial);
   });
 });

@@ -1,11 +1,13 @@
 import type { GraphIssue } from "../api/types";
 import { Icon } from "./icons";
 
-export function StatusBar({ nodes, wires, issues, selected, onFocus }: {
+export function StatusBar({ nodes, wires, issues, selected, pending, onFocus }: {
   nodes: number;
   wires: number;
   issues: GraphIssue[];
   selected: string | null;
+  /** Playing, with edits not yet applied. */
+  pending: boolean;
   onFocus: (node: string) => void;
 }) {
   const errors = issues.filter((issue) => issue.severity === "error");
@@ -16,7 +18,7 @@ export function StatusBar({ nodes, wires, issues, selected, onFocus }: {
       <span>{nodes} nodes · {wires} wires</span>
       {selected && <span>{selected} selected</span>}
       {issues.length === 0 ? (
-        <span className="ok"><Icon name="check" size={12} /> Ready to apply</span>
+        <span className="ok"><Icon name="check" size={12} /> {pending ? "Ready to apply" : "No problems"}</span>
       ) : (
         <button type="button" className={`issues ${errors.length ? "error" : "warning"}`}
           disabled={!first?.node} onClick={() => first?.node && onFocus(first.node)}>

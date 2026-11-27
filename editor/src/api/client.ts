@@ -4,7 +4,8 @@ import type {
   LevelReading,
   NodeDescriptor,
   ProbeWindow,
-  RevisionUpdate,
+  RevisionEvent,
+  SessionEnded,
   SessionInfo,
 } from "./types";
 
@@ -21,7 +22,8 @@ export interface EngineClient {
   sessionInfo(): Promise<SessionInfo>;
   validate(graph: GraphSpec): Promise<GraphIssue[]>;
   exportDsl(graph: GraphSpec): Promise<string>;
-  startSession(graph: GraphSpec): Promise<void>;
+  /** Resolves with the new session's id. */
+  startSession(graph: GraphSpec): Promise<number>;
   stopSession(): Promise<void>;
   /** Resolves with the revision once the graph passed validation. */
   applyGraph(graph: GraphSpec): Promise<number>;
@@ -29,9 +31,9 @@ export interface EngineClient {
   probe(graph: GraphSpec, node: string, frames: number): Promise<ProbeWindow>;
   /** Peak of what is playing, or null without a session. */
   level(frames: number): Promise<LevelReading | null>;
-  onRevision(listener: (update: RevisionUpdate) => void): () => void;
-  /** Playback ended on its own; `message` is set when it failed. */
-  onSessionEnded(listener: (message: string | null) => void): () => void;
+  onRevision(listener: (event: RevisionEvent) => void): () => void;
+  /** Playback failed on its own (stops you requested aren't reported). */
+  onSessionEnded(listener: (event: SessionEnded) => void): () => void;
 }
 
 export async function connectEngine(): Promise<EngineClient> {

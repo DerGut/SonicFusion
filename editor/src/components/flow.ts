@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
+import { createContext } from "react";
 
 import type {
   GraphIssue,
@@ -38,13 +39,17 @@ export interface SfNodeData extends Record<string, unknown> {
   sources: Record<string, string>;
   issues: GraphIssue[];
   session: SessionInfo;
-  /** Output node only. */
-  level: LevelReading | null;
   ceilingDb: number;
   actions: NodeActions;
 }
 
 export type SfNode = Node<SfNodeData, "sf">;
+
+/**
+ * The output level, outside node data so a new reading every 100 ms
+ * re-renders only the meter instead of every node.
+ */
+export const LevelContext = createContext<LevelReading | null>(null);
 
 export interface WireData extends Record<string, unknown> {
   signal: Signal;

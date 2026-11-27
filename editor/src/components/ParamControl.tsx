@@ -4,6 +4,8 @@ import type { ParamDescriptor } from "../api/types";
 import { formatHz } from "../model/signal";
 
 const STEPS = 1000;
+/** Keys that move a range input's value. */
+const VALUE_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
 export function toSlider(descriptor: ParamDescriptor, value: number): number {
   const { min, max, scale } = descriptor;
@@ -51,11 +53,13 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
         <label htmlFor={id}>{label ?? descriptor.label}</label>
         {typing === null ? (
           <button type="button" className="value nodrag" title="Click to type a value"
+            aria-label={`${label ?? descriptor.label}: ${formatValue(descriptor, value)}. Type a value`}
             onClick={() => setTyping(String(value))}>
             {formatValue(descriptor, value)}
           </button>
         ) : (
-          <input className="value-input nodrag" autoFocus aria-label={`${descriptor.label} value`}
+          <input className="value-input nodrag" autoFocus aria-label={`${label ?? descriptor.label} value`}
+            onFocus={(event) => event.target.select()}
             value={typing} onChange={(event) => setTyping(event.target.value)} onBlur={commit}
             onKeyDown={(event) => {
               if (event.key === "Enter") commit();
@@ -67,7 +71,7 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
         value={position} style={{ background: fill }}
         aria-valuetext={formatValue(descriptor, value)}
         onPointerDown={onBeginContinuous}
-        onKeyDown={onBeginContinuous}
+        onKeyDown={(event) => VALUE_KEYS.has(event.key) && onBeginContinuous()}
         onChange={(event) => onChange(fromSlider(descriptor, Number(event.target.value)), true)} />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { EngineClient } from "../api/client";
 import type { GraphSpec, ProbeWindow, SessionInfo } from "../api/types";
@@ -17,11 +17,13 @@ const SCOPE_SECONDS = 0.02;
  * output from the draft at the session's current frame; nothing is tapped
  * from the device stream.
  */
-export function ProbePanel({ client, graph, node, playing, session, onClose }: {
+export function ProbePanel({ client, graph, node, playing, draft, session, onClose }: {
   client: EngineClient;
   graph: GraphSpec;
   node: DocNode;
   playing: boolean;
+  /** The draft differs from what is playing, so the probe shows unapplied edits. */
+  draft: boolean;
   session: SessionInfo;
   onClose: () => void;
 }) {
@@ -32,6 +34,8 @@ export function ProbePanel({ client, graph, node, playing, session, onClose }: {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    // One probe at a time; while playing, the next starts after the last returns.
     const run = () =>
       client
         .probe(JSON.parse(graphJson) as GraphSpec, node.id, PROBE_FRAMES)
@@ -40,26 +44,21 @@ export function ProbePanel({ client, graph, node, playing, session, onClose }: {
           setProbe(result);
           setError(null);
         })
-        .catch((reason) => !cancelled && setError(describe(reason)));
-    if (playing) {
-      void run();
-      const timer = setInterval(run, LIVE_INTERVAL_MS);
-      return () => {
-        cancelled = true;
-        clearInterval(timer);
-      };
-    }
-    const timer = setTimeout(run, IDLE_DEBOUNCE_MS);
+        .catch((reason) => !cancelled && setError(describe(reason)))
+        .finally(() => {
+          if (!cancelled && playing) timer = setTimeout(run, LIVE_INTERVAL_MS);
+        });
+    timer = setTimeout(run, playing ? 0 : IDLE_DEBOUNCE_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
   }, [client, graphJson, node.id, playing]);
 
-  const samples = probe?.samples ?? [];
+  const samples = useMemo(() => probe?.samples ?? [], [probe]);
   const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
   const rate = probe?.sample_rate_hz ?? session.sample_rate_hz;
-  const spectrum = samples.length === PROBE_FRAMES ? spectrumDb(samples) : [];
+  const spectrum = useMemo(() => (samples.length === PROBE_FRAMES ? spectrumDb(samples) : []), [samples]);
   const peakBin = spectrum.reduce((best, db, bin) => (bin > 0 && db > (spectrum[best] ?? -Infinity) ? bin : best), 1);
   const cutoff = lowPassMarker(graph, node, session);
 
@@ -70,12 +69,13 @@ export function ProbePanel({ client, graph, node, playing, session, onClose }: {
         <span className="probe-title">{node.id} › out</span>
         <div role="tablist" aria-label="Probe view" className="tabs">
           {(["scope", "spectrum"] as const).map((tab) => (
-            <button key={tab} type="button" role="tab" aria-selected={view === tab}
+            <button key={tab} type="button" role="tab" aria-selected={view === tab} aria-controls="probe-plot"
               className={view === tab ? "active" : ""} onClick={() => setView(tab)}>
               {tab === "scope" ? "Scope" : "Spectrum"}
             </button>
           ))}
         </div>
+        {draft && <span className="draft-tag" title="The probe follows your edits; the meter follows what is playing">draft, not applied</span>}
         <span className="hint">
           {probe ? `recomputed by the ${client.live ? "engine" : "mock engine"} at frame ${probe.start_frame}` : "probing…"}
         </span>
@@ -83,7 +83,7 @@ export function ProbePanel({ client, graph, node, playing, session, onClose }: {
         <button type="button" className="icon-button" aria-label="Close probe" onClick={onClose}><Icon name="close" size={12} /></button>
       </div>
       <div className="probe-body">
-        <div className="plot">
+        <div className="plot" id="probe-plot" role="tabpanel" aria-label={view === "scope" ? "Scope" : "Spectrum"}>
           {error ? (
             <p className="plot-message error">{error}</p>
           ) : view === "scope" ? (

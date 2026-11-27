@@ -1,10 +1,15 @@
 //! Tauri commands for the editor. Every engine interaction goes through
 //! `sonicfusion-host` with complete graphs; this crate never sees engine types.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
 use serde::Serialize;
 use sonicfusion_graph_api::{
-    GraphIssue, GraphSpec, LevelReading, NodeDescriptor, NodeId, ProbeWindow, SessionInfo,
-    catalog as node_catalog,
+    GraphIssue, GraphSpec, LevelReading, NodeDescriptor, NodeId, ProbeWindow, RevisionStatus,
+    SessionInfo, catalog as node_catalog,
 };
 use sonicfusion_host::{Engine, HostError, Session, SessionExit};
 use tauri::{AppHandle, Builder, Emitter, Runtime, State};
@@ -12,7 +17,30 @@ use tokio::sync::Mutex;
 
 struct AppState {
     engine: Engine,
-    session: Mutex<Option<Session>>,
+    /// Commands clone the session out of the slot so long engine work (level,
+    /// probe) never blocks start, stop or apply.
+    session: Mutex<Option<Running>>,
+    next_session: AtomicU64,
+}
+
+#[derive(Clone)]
+struct Running {
+    id: u64,
+    session: Arc<Session>,
+}
+
+/// Revision numbers restart with every session, so events carry the session.
+#[derive(Clone, Debug, Serialize)]
+struct RevisionEvent {
+    session: u64,
+    revision: u64,
+    status: RevisionStatus,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SessionEnded {
+    session: u64,
+    message: String,
 }
 
 /// What a failed command rejects with on the TypeScript side.
@@ -68,34 +96,45 @@ fn export_dsl(state: State<'_, AppState>, graph: GraphSpec) -> CommandResult<Str
     Ok(state.engine.lower(&graph)?.source)
 }
 
-/// Replace any running session with one playing `graph` on the default device.
+/// Replace any running session with one playing `graph` on the default
+/// device, and return the new session's id. An invalid graph leaves a running
+/// session alone.
 #[tauri::command]
 async fn start_session<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     graph: GraphSpec,
-) -> CommandResult<()> {
+) -> CommandResult<u64> {
+    state.engine.lower(&graph)?;
     let mut slot = state.session.lock().await;
     if let Some(previous) = slot.take() {
-        previous.stop().await;
+        previous.session.stop().await;
     }
-    let session = Session::start_device(&state.engine, &graph)?;
+    let session = Arc::new(Session::start_device(&state.engine, &graph)?);
+    let id = state.next_session.fetch_add(1, Ordering::Relaxed) + 1;
     let exited = session.exited();
-    *slot = Some(session);
+    *slot = Some(Running { id, session });
     drop(slot);
     tauri::async_runtime::spawn(async move {
         // Stops requested through `stop_session` are not news to the UI.
         if let SessionExit::Failed(message) = exited.await {
-            let _ = app.emit("session-ended", Some(message));
+            let _ = app.emit(
+                "session-ended",
+                SessionEnded {
+                    session: id,
+                    message,
+                },
+            );
         }
     });
-    Ok(())
+    Ok(id)
 }
 
 #[tauri::command]
 async fn stop_session(state: State<'_, AppState>) -> CommandResult<()> {
-    if let Some(session) = state.session.lock().await.take() {
-        session.stop().await;
+    let running = state.session.lock().await.take();
+    if let Some(running) = running {
+        running.session.stop().await;
     }
     Ok(())
 }
@@ -107,10 +146,17 @@ async fn apply_graph<R: Runtime>(
     state: State<'_, AppState>,
     graph: GraphSpec,
 ) -> CommandResult<u64> {
-    let slot = state.session.lock().await;
-    let session = slot.as_ref().ok_or(HostError::NoSession)?;
-    Ok(session.apply(&graph, move |update| {
-        let _ = app.emit("revision-status", update);
+    let running = current(&state).await.ok_or(HostError::NoSession)?;
+    let session = running.id;
+    Ok(running.session.apply(&graph, move |update| {
+        let _ = app.emit(
+            "revision-status",
+            RevisionEvent {
+                session,
+                revision: update.revision,
+                status: update.status,
+            },
+        );
     })?)
 }
 
@@ -123,10 +169,9 @@ async fn probe(
     node: String,
     frames: usize,
 ) -> CommandResult<ProbeWindow> {
-    let start_frame = match state.session.lock().await.as_ref() {
-        Some(session) => session.next_output_frame(),
-        None => 0,
-    };
+    let start_frame = current(&state)
+        .await
+        .map_or(0, |running| running.session.next_output_frame());
     let node = NodeId::new(node);
     let samples = state
         .engine
@@ -140,13 +185,21 @@ async fn probe(
     })
 }
 
+/// Peak of what is playing, or nothing without a running session.
 #[tauri::command]
 async fn level(state: State<'_, AppState>, frames: usize) -> CommandResult<Option<LevelReading>> {
-    let slot = state.session.lock().await;
-    match slot.as_ref() {
-        Some(session) => Ok(Some(session.level(frames).await?)),
-        None => Ok(None),
+    let Some(running) = current(&state).await else {
+        return Ok(None);
+    };
+    match running.session.level(frames).await {
+        Ok(reading) => Ok(Some(reading)),
+        Err(HostError::NoSession) => Ok(None),
+        Err(error) => Err(error.into()),
     }
+}
+
+async fn current(state: &AppState) -> Option<Running> {
+    state.session.lock().await.clone()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -162,6 +215,7 @@ fn with_engine<R: Runtime>(builder: Builder<R>, engine: Engine) -> Builder<R> {
         .manage(AppState {
             engine,
             session: Mutex::new(None),
+            next_session: AtomicU64::new(0),
         })
         .invoke_handler(tauri::generate_handler![
             catalog,
@@ -258,10 +312,15 @@ mod tests {
         let (_app, webview) = webview();
         let mut broken = fixture();
         broken["nodes"][0]["params"]["frequency_hz"] = json!(30_000.0);
-        let error = call(&webview, "export_dsl", json!({"graph": broken})).unwrap_err();
+        let error = call(&webview, "export_dsl", json!({"graph": broken.clone()})).unwrap_err();
         assert_eq!(error["kind"], "invalid");
         assert_eq!(error["issues"][0]["node"], "osc_a");
         assert_eq!(error["issues"][0]["param"], "frequency_hz");
+
+        // Refused before any device is opened or a running session is stopped.
+        let error = call(&webview, "start_session", json!({"graph": broken})).unwrap_err();
+        assert_eq!(error["kind"], "invalid");
+        assert_eq!(error["message"], "the graph has 1 error");
 
         let error = call(&webview, "apply_graph", json!({"graph": fixture()})).unwrap_err();
         assert_eq!(error["kind"], "no_session");

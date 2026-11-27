@@ -89,11 +89,34 @@ export function addNode(
     const { weight, default: count } = descriptor.variadic_input;
     params[weight.name] = Array.from({ length: count }, () => weight.default);
   }
-  const id = uniqueId(doc, kind);
+  const id = nextNodeId(doc, kind);
   return [{ ...doc, nodes: [...doc.nodes, { id, kind, params, position }] }, id];
 }
 
-function uniqueId(doc: EditorDocument, kind: NodeKind): string {
+/**
+ * Add `kind` at `position` and wire `from` into its first audio input. The
+ * output node is unique, so picking it rewires the existing one instead.
+ * Returns the node that received the wire.
+ */
+export function addConnectedNode(
+  doc: EditorDocument,
+  catalog: Catalog,
+  kind: NodeKind,
+  position: Position,
+  from?: string,
+): [EditorDocument, string | null] {
+  const output = doc.nodes.find((node) => node.kind === "output");
+  if (kind === "output" && output) {
+    return from ? [connect(doc, from, { node: output.id, port: "in" }), output.id] : [doc, null];
+  }
+  const [added, id] = addNode(doc, catalog, kind, position);
+  const node = added.nodes.find((candidate) => candidate.id === id)!;
+  const first = inputPorts(node, catalog).find((port) => port.signal === "audio");
+  return [from && first ? connect(added, from, { node: id, port: first.name }) : added, id];
+}
+
+/** The id `addNode` will give the next node of `kind`. */
+export function nextNodeId(doc: EditorDocument, kind: NodeKind): string {
   const taken = new Set(doc.nodes.map((node) => node.id));
   for (let index = 1; ; index++) {
     const id = `${kind}_${index}`;
@@ -193,13 +216,42 @@ export function wireId(wire: Wire): string {
   return `${wire.from}->${wire.to.node}:${wire.to.port}`;
 }
 
+const KINDS = new Set<NodeKind>(["sine", "square", "sawtooth", "gain", "low_pass", "mix", "output"]);
+
+/**
+ * Parse a saved project, checking the shape the editor relies on. The engine
+ * still validates the graph itself; this only keeps a damaged file from
+ * breaking the UI.
+ */
 export function parseDocument(text: string): EditorDocument {
   const value = JSON.parse(text) as Partial<EditorDocument>;
   if (value.format !== "sonicfusion-editor" || value.version !== 1) {
     throw new Error("not a SonicFusion editor project (version 1)");
   }
-  if (!Array.isArray(value.nodes) || !Array.isArray(value.wires)) {
-    throw new Error("project is missing nodes or wires");
+  if (typeof value.name !== "string" || !Array.isArray(value.nodes) || !Array.isArray(value.wires)) {
+    throw new Error("project is missing its name, nodes or wires");
+  }
+  for (const node of value.nodes as unknown[]) {
+    const candidate = node as Partial<DocNode> | null;
+    const position = candidate?.position;
+    if (
+      typeof candidate?.id !== "string" ||
+      !KINDS.has(candidate.kind as NodeKind) ||
+      typeof candidate.params !== "object" ||
+      candidate.params === null ||
+      typeof position?.x !== "number" ||
+      typeof position?.y !== "number" ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y)
+    ) {
+      throw new Error("project has a malformed node");
+    }
+  }
+  for (const wire of value.wires as unknown[]) {
+    const candidate = wire as Partial<Wire> | null;
+    if (typeof candidate?.from !== "string" || typeof candidate.to?.node !== "string" || typeof candidate.to?.port !== "string") {
+      throw new Error("project has a malformed wire");
+    }
   }
   return value as EditorDocument;
 }

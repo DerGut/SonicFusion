@@ -29,8 +29,11 @@ The node vocabulary (kinds, ports, parameter ranges) comes from `sonicfusion_gra
 ## Behaviour worth knowing
 
 - **Applying is a hard cut.** The new circuit starts at the next 1024-frame block with fresh filter state. The previous circuit keeps playing until then, and keeps playing if the engine rejects an edit.
-- **Drafts may be invalid.** Errors appear on the nodes and in the status bar, and nothing is submitted until they're fixed. Auto-apply submits valid drafts 350 ms after edits settle.
-- **The level meter and the Scope/Spectrum probe show engine output.** The host recomputes a node's signal offline at the session's current frame; it isn't tapped from the device stream. The meter's ceiling is a warning threshold only, because the engine has no limiter.
+- **Drafts may be invalid.** Errors appear on the nodes and in the status bar, and nothing is submitted until the current draft has been checked and has no errors. Auto-apply submits valid drafts 350 ms after edits settle.
+- **Nodes that don't reach the output only warn.** They aren't played, so their problems don't block applying. Wires the engine wouldn't use (for example out of the output node) are ignored with a warning.
+- **Circuits are bounded.** A chain may be at most 256 nodes deep. The engine re-runs a shared node once per consumer, so reconvergent fan-out is capped at 256 node executions per circuit.
+- **Adding nodes:** drag from the palette, press Tab over the canvas, or drop a wire on empty canvas to add a node that's already connected.
+- **The level meter and the Scope/Spectrum probe show engine output.** The host recomputes a node's signal offline at the session's current frame; it isn't tapped from the device stream. The meter follows what is playing; the probe follows the draft and says so when the draft isn't applied. The meter's ceiling is a warning threshold only, because the engine has no limiter.
 - **Low-pass cutoff modulation** uses the engine's fixed mapping (1 kHz ± 900 Hz at 48 kHz).
 - **The session runs at 48 kHz.** Devices that don't offer 48 kHz natively (some Bluetooth speakers run at 44.1 kHz) fail to start with a clear error until the host adopts the device-rate selection from #25.
 - **Projects autosave** to local storage. Export `.sf` shows the DSL to run with `live_runtime`.

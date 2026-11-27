@@ -4,6 +4,7 @@ import catalogJson from "../../../crates/sonicfusion-graph-api/fixtures/catalog.
 import studioPatch from "../../../crates/sonicfusion-graph-api/fixtures/studio-patch.json";
 import type { GraphSpec, NodeDescriptor } from "../api/types";
 import {
+  addConnectedNode,
   addMixInput,
   addNode,
   catalogMap,
@@ -66,7 +67,23 @@ describe("document", () => {
     expect(disconnect(more, { node: "out", port: "in" }).wires.length).toBe(more.wires.length - 1);
   });
 
-  it("rejects foreign files", () => {
+  it("adds a node from a dropped wire, already connected", () => {
+    const [doc, id] = addConnectedNode(studio(), catalog, "low_pass", { x: 0, y: 0 }, "osc_a");
+    expect(id).toBe("low_pass_1");
+    expect(doc.wires).toContainEqual({ from: "osc_a", to: { node: "low_pass_1", port: "in" } });
+
+    const [rewired, target] = addConnectedNode(studio(), catalog, "output", { x: 0, y: 0 }, "mix");
+    expect(target).toBe("out");
+    expect(rewired.nodes.filter((node) => node.kind === "output")).toHaveLength(1);
+    expect(rewired.wires).toContainEqual({ from: "mix", to: { node: "out", port: "in" } });
+  });
+
+  it("rejects foreign and damaged files", () => {
     expect(() => parseDocument(JSON.stringify({ version: 1 }))).toThrow();
+    const damaged = studio();
+    delete (damaged.nodes[0] as Partial<(typeof damaged.nodes)[0]>).position;
+    expect(() => parseDocument(JSON.stringify(damaged))).toThrow("malformed node");
+    const unknown = { ...studio(), wires: [{ from: "a" }] };
+    expect(() => parseDocument(JSON.stringify(unknown))).toThrow("malformed wire");
   });
 });

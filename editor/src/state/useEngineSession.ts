@@ -26,25 +26,32 @@ const LEVEL_FRAMES = 1024;
 
 /**
  * Session lifecycle and whole-graph submission. The draft may be invalid;
- * nothing is submitted until it has no errors.
+ * nothing is submitted unless `canSubmit` says the current draft was checked
+ * and has no errors.
  */
-export function useEngineSession(client: EngineClient, draft: GraphSpec, hasErrors: boolean, autoApply: boolean) {
+export function useEngineSession(client: EngineClient, draft: GraphSpec, canSubmit: boolean, autoApply: boolean) {
   const [playback, setPlayback] = useState<Playback>({ state: "idle" });
   const [latest, setLatest] = useState<RevisionInfo | null>(null);
+  /** A submission the host refused before it got a revision. */
+  const [refused, setRefused] = useState<{ json: string; message: string; issues: GraphIssue[] } | null>(null);
   const [appliedJson, setAppliedJson] = useState<string | null>(null);
-  const [commandIssues, setCommandIssues] = useState<GraphIssue[]>([]);
   const [level, setLevel] = useState<LevelReading | null>(null);
+  const session = useRef<number | null>(null);
   const submitted = useRef(new Map<number, string>());
+  const appliedEarly = useRef(new Set<number>());
   const lastSubmittedJson = useRef<string | null>(null);
   const draftJson = JSON.stringify(draft);
 
   useEffect(
     () =>
-      client.onRevision(({ revision, status }) => {
+      client.onRevision(({ session: id, revision, status }) => {
+        if (id !== session.current) return; // A stopped session's late news.
         setLatest((current) => (current && current.revision > revision ? current : { revision, status }));
         if (status.state === "applied") {
           const json = submitted.current.get(revision);
           if (json) setAppliedJson(json);
+          // The event can beat the invoke's reply; settle it there.
+          else appliedEarly.current.add(revision);
         }
       }),
     [client],
@@ -52,8 +59,10 @@ export function useEngineSession(client: EngineClient, draft: GraphSpec, hasErro
 
   useEffect(
     () =>
-      client.onSessionEnded((message) => {
-        setPlayback(message ? { state: "failed", message } : { state: "idle" });
+      client.onSessionEnded(({ session: id, message }) => {
+        if (id !== session.current) return;
+        session.current = null;
+        setPlayback({ state: "failed", message });
         setLevel(null);
       }),
     [client],
@@ -61,20 +70,24 @@ export function useEngineSession(client: EngineClient, draft: GraphSpec, hasErro
 
   const start = useCallback(async () => {
     setPlayback({ state: "starting" });
-    setCommandIssues([]);
+    setRefused(null);
     try {
-      await client.startSession(draft);
+      const id = await client.startSession(draft);
+      session.current = id;
+      submitted.current.clear();
+      appliedEarly.current.clear();
       setPlayback({ state: "playing" });
       setAppliedJson(draftJson);
       lastSubmittedJson.current = draftJson;
       setLatest(null);
     } catch (error) {
       setPlayback({ state: "failed", message: describe(error) });
-      if (isCommandError(error)) setCommandIssues(error.issues);
+      if (isCommandError(error)) setRefused({ json: draftJson, message: describe(error), issues: error.issues });
     }
   }, [client, draft, draftJson]);
 
   const stop = useCallback(async () => {
+    session.current = null;
     await client.stopSession();
     setPlayback({ state: "idle" });
     setLevel(null);
@@ -82,16 +95,17 @@ export function useEngineSession(client: EngineClient, draft: GraphSpec, hasErro
 
   const apply = useCallback(async () => {
     lastSubmittedJson.current = draftJson;
-    setCommandIssues([]);
+    setRefused(null);
     try {
       const revision = await client.applyGraph(draft);
       submitted.current.set(revision, draftJson);
+      if (appliedEarly.current.delete(revision)) setAppliedJson(draftJson);
     } catch (error) {
-      setLatest((current) => ({
-        revision: current?.revision ?? 0,
-        status: { state: "rejected", message: describe(error), issues: isCommandError(error) ? error.issues : [] },
-      }));
-      if (isCommandError(error)) setCommandIssues(error.issues);
+      setRefused({
+        json: draftJson,
+        message: describe(error),
+        issues: isCommandError(error) ? error.issues : [],
+      });
     }
   }, [client, draft, draftJson]);
 
@@ -100,31 +114,42 @@ export function useEngineSession(client: EngineClient, draft: GraphSpec, hasErro
   // Auto-apply valid drafts after edits settle, so slider drags don't become
   // a revision per tick.
   useEffect(() => {
-    if (!playing || !autoApply || hasErrors || draftJson === lastSubmittedJson.current) return;
+    if (!playing || !autoApply || !canSubmit || draftJson === lastSubmittedJson.current) return;
     const timer = setTimeout(() => void apply(), AUTO_APPLY_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [playing, autoApply, hasErrors, draftJson, apply]);
+  }, [playing, autoApply, canSubmit, draftJson, apply]);
 
+  // Poll one reading at a time, so a slow render can't pile up requests.
   useEffect(() => {
     if (!playing) return;
     let cancelled = false;
-    const timer = setInterval(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = () => {
       client
         .level(LEVEL_FRAMES)
         .then((reading) => !cancelled && setLevel(reading))
-        .catch(() => {});
-    }, LEVEL_INTERVAL_MS);
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) timer = setTimeout(poll, LEVEL_INTERVAL_MS);
+        });
+    };
+    poll();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [client, playing]);
+
+  // A refusal describes the draft it was about; edits make it stale.
+  const currentRefusal = refused && refused.json === draftJson ? refused : null;
 
   return {
     playback,
     latest,
     level,
-    commandIssues,
+    refusal: currentRefusal,
+    /** Engine-side issues for the current draft, to show on nodes. */
+    engineIssues: currentRefusal?.issues.filter((issue) => issue.code === "engine_rejected") ?? [],
     dirty: playing && appliedJson !== draftJson,
     start,
     stop,

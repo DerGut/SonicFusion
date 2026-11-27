@@ -1,12 +1,12 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { Component, type ReactNode, useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import studioPatch from "../../crates/sonicfusion-graph-api/fixtures/studio-patch.json";
 import { type EngineClient, connectEngine } from "./api/client";
 import type { GraphIssue, GraphSpec, NodeKind, ParamValue, SessionInfo } from "./api/types";
 import { Canvas } from "./components/Canvas";
 import { ExportDialog } from "./components/ExportDialog";
-import type { NodeActions, SfEdge, SfNode } from "./components/flow";
+import { LevelContext, type NodeActions, type SfEdge, type SfNode } from "./components/flow";
 import { Palette } from "./components/Palette";
 import { ProbePanel } from "./components/ProbePanel";
 import { StatusBar } from "./components/StatusBar";
@@ -15,12 +15,12 @@ import {
   type Catalog,
   type EditorDocument,
   type Position,
+  addConnectedNode,
   addMixInput,
-  addNode,
   catalogMap,
   connect,
-  inputPorts,
   moveNodes,
+  nextNodeId,
   parseDocument,
   removeMixInput,
   removeNodes,
@@ -33,6 +33,7 @@ import { historyReducer } from "./state/history";
 import { describe, useEngineSession } from "./state/useEngineSession";
 
 const DOCUMENT_KEY = "sonicfusion.document";
+const VALIDATE_DELAY_MS = 120;
 
 export function App() {
   const [ready, setReady] = useState<{ client: EngineClient; catalog: Catalog; session: SessionInfo } | null>(null);
@@ -48,10 +49,40 @@ export function App() {
   if (error) return <div className="loading error">Couldn't reach the engine: {error}</div>;
   if (!ready) return <div className="loading">Connecting to the engine…</div>;
   return (
-    <ReactFlowProvider>
-      <Editor {...ready} />
-    </ReactFlowProvider>
+    <CrashBoundary>
+      <ReactFlowProvider>
+        <Editor {...ready} />
+      </ReactFlowProvider>
+    </CrashBoundary>
   );
+}
+
+/** Keeps a broken project from leaving a blank window on every launch. */
+class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="crash" role="alert">
+        <p>The editor hit an error: {this.state.error.message}</p>
+        <button type="button" className="button primary" onClick={() => {
+          try {
+            localStorage.removeItem(DOCUMENT_KEY);
+          } catch {
+            // Nothing saved to clear.
+          }
+          window.location.reload();
+        }}>
+          Reset the project and reload
+        </button>
+      </div>
+    );
+  }
 }
 
 function Editor({ client, catalog, session }: { client: EngineClient; catalog: Catalog; session: SessionInfo }) {
@@ -66,22 +97,36 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
   const graphJson = JSON.stringify(toGraph(doc));
   const graph = useMemo(() => JSON.parse(graphJson) as GraphSpec, [graphJson]);
 
-  const [issues, setIssues] = useState<GraphIssue[]>([]);
+  // Issues belong to the graph they were computed for, so a stale "no errors"
+  // can never let an unchecked draft through.
+  const [checked, setChecked] = useState<{ json: string; issues: GraphIssue[] } | null>(null);
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
-      client.validate(graph).then((result) => !cancelled && setIssues(result)).catch(() => {});
-    }, 120);
+      client
+        .validate(graph)
+        .then((issues) => !cancelled && setChecked({ json: graphJson, issues }))
+        .catch((reason) => {
+          if (cancelled) return;
+          const issue: GraphIssue = { severity: "error", code: "engine_rejected", node: null, port: null, param: null, message: `couldn't check the graph: ${describe(reason)}` };
+          setChecked({ json: graphJson, issues: [issue] });
+        });
+    }, VALIDATE_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [client, graph]);
-  const hasErrors = issues.some((issue) => issue.severity === "error");
+  }, [client, graph, graphJson]);
+  const current = checked?.json === graphJson;
+  const issues = checked?.issues ?? [];
 
   const [autoApply, setAutoApply] = useStored("sonicfusion.autoApply", true);
   const [ceilingDb, setCeilingDb] = useStored("sonicfusion.ceilingDb", -6);
-  const engine = useEngineSession(client, graph, hasErrors, autoApply);
+  const allIssues = issues;
+  const hasErrors = issues.some((issue) => issue.severity === "error");
+  const engine = useEngineSession(client, graph, current && !hasErrors, autoApply);
+  const shownIssues = useMemo(() => [...allIssues, ...engine.engineIssues], [allIssues, engine.engineIssues]);
+  const errorCount = shownIssues.filter((issue) => issue.severity === "error").length;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportSource, setExportSource] = useState<string | null>(null);
 
@@ -98,7 +143,7 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof Element && event.target.closest("input, textarea")) return;
+      if (isTextEntry(event.target)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         dispatch({ type: event.shiftKey ? "redo" : "undo" });
@@ -129,20 +174,12 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
 
   const add = useCallback(
     (kind: NodeKind, position: Position, connectFrom?: string) => {
-      const existingOutput = doc.nodes.find((node) => node.kind === "output");
-      if (kind === "output" && existingOutput) {
-        if (connectFrom) edit((current) => connect(current, connectFrom, { node: existingOutput.id, port: "in" }));
-        return;
-      }
-      let added = "";
-      edit((current) => {
-        const [next, id] = addNode(current, catalog, kind, position);
-        added = id;
-        const node = next.nodes.find((candidate) => candidate.id === id)!;
-        const first = inputPorts(node, catalog).find((port) => port.signal === "audio");
-        return connectFrom && first ? connect(next, connectFrom, { node: id, port: first.name }) : next;
-      });
-      if (added) setSelected(new Set([added]));
+      // Decided from the current document, outside the reducer, so the new
+      // node can be selected right away.
+      const [, target] = addConnectedNode(doc, catalog, kind, position, connectFrom);
+      edit((current) => addConnectedNode(current, catalog, kind, position, connectFrom)[0]);
+      const id = target ?? (kind === "output" ? null : nextNodeId(doc, kind));
+      if (id) setSelected(new Set([id]));
     },
     [doc, catalog, edit],
   );
@@ -161,7 +198,6 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
   };
 
   const selectedNode = selected.size === 1 ? doc.nodes.find((node) => selected.has(node.id)) ?? null : null;
-  const allIssues = useMemo(() => [...issues, ...engine.commandIssues.filter((issue) => issue.code === "engine_rejected")], [issues, engine.commandIssues]);
   const playing = engine.playback.state === "playing";
 
   return (
@@ -174,8 +210,10 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
         batchFrames={session.batch_frames}
         playback={engine.playback}
         latest={engine.latest}
+        refusal={engine.refusal}
         dirty={engine.dirty}
-        errorCount={allIssues.filter((issue) => issue.severity === "error").length}
+        errorCount={errorCount}
+        checking={!current}
         autoApply={autoApply}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
@@ -198,27 +236,32 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
       <div className="workspace">
         <Palette catalog={catalog} hasOutput={doc.nodes.some((node) => node.kind === "output")} onAdd={addAtCenter} />
         <main className="main">
-          <Canvas
-            doc={doc}
-            catalog={catalog}
-            issues={allIssues}
-            session={session}
-            level={engine.level}
-            ceilingDb={ceilingDb}
-            selected={selected}
-            actions={actions}
-            onSelect={setSelected}
-            onMove={(positions) => edit((current) => moveNodes(current, positions), false)}
-            onRemove={(nodes, wires) => {
-              const gone = new Set(wires);
-              edit((current) => {
-                const withoutWires = { ...current, wires: current.wires.filter((wire) => !gone.has(wireId(wire))) };
-                return removeNodes(withoutWires, nodes);
-              });
-            }}
-            onConnect={(from, to) => edit((current) => connect(current, from, to))}
-            onAdd={add}
-          />
+          <LevelContext.Provider value={engine.level}>
+            <Canvas
+              doc={doc}
+              catalog={catalog}
+              issues={shownIssues}
+              session={session}
+              ceilingDb={ceilingDb}
+              selected={selected}
+              actions={actions}
+              onSelect={setSelected}
+              onMove={(positions, start) => {
+                if (start) dispatch({ type: "checkpoint" });
+                edit((current) => moveNodes(current, positions), false);
+              }}
+              onRemove={(nodes, wires) => {
+                const gone = new Set(wires);
+                edit((current) => {
+                  const withoutWires = { ...current, wires: current.wires.filter((wire) => !gone.has(wireId(wire))) };
+                  return removeNodes(withoutWires, nodes);
+                });
+                if (nodes.length > 0) setSelected(new Set());
+              }}
+              onConnect={(from, to) => edit((current) => connect(current, from, to))}
+              onAdd={add}
+            />
+          </LevelContext.Provider>
           {selectedNode && (
             <ProbePanel
               key={selectedNode.id}
@@ -226,6 +269,7 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
               graph={graph}
               node={selectedNode}
               playing={playing}
+              draft={engine.dirty}
               session={session}
               onClose={() => setSelected(new Set())}
             />
@@ -235,8 +279,9 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
       <StatusBar
         nodes={doc.nodes.length}
         wires={doc.wires.length}
-        issues={allIssues}
+        issues={shownIssues}
         selected={selectedNode?.id ?? null}
+        pending={engine.dirty}
         onFocus={focus}
       />
       {exportSource !== null && (
@@ -244,6 +289,13 @@ function Editor({ client, catalog, session }: { client: EngineClient; catalog: C
       )}
     </div>
   );
+}
+
+/** Fields where Cmd+Z should edit text rather than undo the patch. */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (!(target instanceof HTMLInputElement)) return false;
+  return !["range", "checkbox", "radio", "button"].includes(target.type);
 }
 
 function loadDocument(): EditorDocument | null {

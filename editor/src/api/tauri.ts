@@ -8,7 +8,8 @@ import type {
   LevelReading,
   NodeDescriptor,
   ProbeWindow,
-  RevisionUpdate,
+  RevisionEvent,
+  SessionEnded,
   SessionInfo,
 } from "./types";
 
@@ -33,7 +34,7 @@ export class TauriEngine implements EngineClient {
   }
 
   startSession(graph: GraphSpec) {
-    return invoke<void>("start_session", { graph });
+    return invoke<number>("start_session", { graph });
   }
 
   stopSession() {
@@ -52,12 +53,12 @@ export class TauriEngine implements EngineClient {
     return invoke<LevelReading | null>("level", { frames });
   }
 
-  onRevision(listener: (update: RevisionUpdate) => void) {
-    return subscribe<RevisionUpdate>("revision-status", listener);
+  onRevision(listener: (event: RevisionEvent) => void) {
+    return subscribe<RevisionEvent>("revision-status", listener);
   }
 
-  onSessionEnded(listener: (message: string | null) => void) {
-    return subscribe<string | null>("session-ended", listener);
+  onSessionEnded(listener: (event: SessionEnded) => void) {
+    return subscribe<SessionEnded>("session-ended", listener);
   }
 }
 

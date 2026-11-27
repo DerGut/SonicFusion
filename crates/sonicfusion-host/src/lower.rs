@@ -1,6 +1,8 @@
 use std::{collections::HashMap, fmt::Write as _};
 
-use sonicfusion_graph_api::{GraphIssue, GraphSpec, IssueCode, NodeId, NodeKind};
+use sonicfusion_graph_api::{
+    GraphIssue, GraphSpec, IssueCode, NodeId, NodeKind, PortRef, input_map,
+};
 
 /// DSL source for one graph, one statement per line in dependency order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,31 +21,30 @@ impl Lowered {
 
 /// Lower the sub-graph that feeds `root` to DSL, ending in `-> out`. The graph
 /// must be structurally valid along that path; unrelated nodes are ignored.
-/// If `root` is not an output node, its own signal becomes the output.
+/// If `root` is not an output node, its own signal becomes the output. Only
+/// the wires `validate` accepts are followed (see [`input_map`]).
 pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue>> {
     let nodes: HashMap<&NodeId, &NodeKind> = graph
         .nodes
         .iter()
         .map(|node| (&node.id, &node.kind))
         .collect();
-    let mut inputs: HashMap<(&NodeId, &str), &NodeId> = HashMap::new();
-    for wire in &graph.wires {
-        inputs
-            .entry((&wire.to.node, wire.to.port.as_str()))
-            .or_insert(&wire.from);
-    }
+    let inputs = input_map(graph);
+    let wired = |node: &NodeId, port: &str| {
+        inputs.get(&PortRef {
+            node: node.clone(),
+            port: port.into(),
+        })
+    };
     let input = |node: &NodeId, port: &str| -> Result<NodeId, GraphIssue> {
-        inputs
-            .get(&(node, port))
-            .map(|&from| from.clone())
-            .ok_or_else(|| {
-                GraphIssue::error(
-                    IssueCode::MissingInput,
-                    Some(node),
-                    format!("input {port:?} is not connected"),
-                )
-                .on_port(port)
-            })
+        wired(node, port).cloned().ok_or_else(|| {
+            GraphIssue::error(
+                IssueCode::MissingInput,
+                Some(node),
+                format!("input {port:?} is not connected"),
+            )
+            .on_port(port)
+        })
     };
 
     let order = dependency_order(root, &nodes, &input)?;
@@ -76,8 +77,8 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
             }
             NodeKind::LowPass { cutoff_hz } => {
                 let audio = input(id, "in").map_err(one)?;
-                let cutoff = match inputs.get(&(id, "cutoff")) {
-                    Some(&control) => var(control).to_string(),
+                let cutoff = match wired(id, "cutoff") {
+                    Some(control) => var(control).to_string(),
                     None => num(*cutoff_hz),
                 };
                 format!("lpf({}, {cutoff})", var(&audio))
@@ -223,6 +224,27 @@ mod tests {
         assert!(lowered.source.contains("mix([$n0, $n0], [0.6, 0.4])"));
         assert!(!lowered.source.contains("square"));
         build_live_plan(&lowered.source, &ExecutionConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn wires_out_of_the_output_are_not_followed() {
+        let mut graph = fixture();
+        graph.wires.insert(
+            0,
+            sonicfusion_graph_api::Wire {
+                from: NodeId::new("out"),
+                to: PortRef {
+                    node: NodeId::new("gain"),
+                    port: "in".into(),
+                },
+            },
+        );
+        let lowered = lower(&graph, &NodeId::new("gain")).unwrap();
+        assert!(
+            lowered.source.contains("gain($n4, 0.08)"),
+            "{}",
+            lowered.source
+        );
     }
 
     #[test]

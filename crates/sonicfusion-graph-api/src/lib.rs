@@ -24,4 +24,7 @@ pub use spec::{
 pub use status::{
     LevelReading, ModulationMapping, ProbeWindow, RevisionStatus, RevisionUpdate, SessionInfo,
 };
-pub use validate::{GraphIssue, IssueCode, Severity, has_errors, upstream_of, validate};
+pub use validate::{
+    GraphIssue, IssueCode, MAX_DEPTH, MAX_EXECUTIONS, Severity, has_errors, input_map, upstream_of,
+    validate, validate_upstream,
+};

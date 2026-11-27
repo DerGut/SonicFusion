@@ -9,6 +9,7 @@ import type {
   NodeDescriptor,
   NodeSpec,
   ProbeWindow,
+  RevisionEvent,
   RevisionUpdate,
   SessionInfo,
 } from "./types";
@@ -29,9 +30,11 @@ export class MockEngine implements EngineClient {
   readonly live = false;
 
   private revision = 0;
+  private session = 0;
   private playing: GraphSpec | null = null;
   private startedAt = 0;
-  private revisionListeners = new Set<(update: RevisionUpdate) => void>();
+  private timers: ReturnType<typeof setTimeout>[] = [];
+  private revisionListeners = new Set<(event: RevisionEvent) => void>();
 
   async catalog() {
     return catalogJson as NodeDescriptor[];
@@ -52,12 +55,21 @@ export class MockEngine implements EngineClient {
 
   async startSession(graph: GraphSpec) {
     throwIfInvalid(graph);
+    this.cancelTimers();
     this.playing = graph;
+    this.revision = 0;
     this.startedAt = performance.now();
+    return ++this.session;
   }
 
   async stopSession() {
+    this.cancelTimers();
     this.playing = null;
+  }
+
+  private cancelTimers() {
+    this.timers.forEach(clearTimeout);
+    this.timers = [];
   }
 
   async applyGraph(graph: GraphSpec) {
@@ -71,11 +83,14 @@ export class MockEngine implements EngineClient {
       { state: "scheduled", frame },
       { state: "applied", frame },
     ];
+    const session = this.session;
     steps.forEach((status, index) =>
-      setTimeout(() => {
-        if (status.state === "applied") this.playing = graph;
-        this.emit({ revision, status });
-      }, index * 60),
+      this.timers.push(
+        setTimeout(() => {
+          if (status.state === "applied") this.playing = graph;
+          this.emit({ session, revision, status });
+        }, index * 60),
+      ),
     );
     return revision;
   }
@@ -102,7 +117,7 @@ export class MockEngine implements EngineClient {
     return { frame, frames, peak_dbfs: peak > 0 ? 20 * Math.log10(peak) : null };
   }
 
-  onRevision(listener: (update: RevisionUpdate) => void) {
+  onRevision(listener: (event: RevisionEvent) => void) {
     this.revisionListeners.add(listener);
     return () => void this.revisionListeners.delete(listener);
   }
@@ -111,8 +126,8 @@ export class MockEngine implements EngineClient {
     return () => {};
   }
 
-  private emit(update: RevisionUpdate) {
-    for (const listener of this.revisionListeners) listener(update);
+  private emit(event: RevisionEvent) {
+    for (const listener of this.revisionListeners) listener(event);
   }
 
   private frame() {

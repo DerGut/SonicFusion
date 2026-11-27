@@ -74,7 +74,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
           onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
       );
     }
-    if (node.kind === "low_pass" && control) handles.push(inputHandle(control, rowPortTop(index)));
+    if (param.name === "cutoff_hz" && control) handles.push(inputHandle(control, rowPortTop(index)));
   });
 
   return (
@@ -97,7 +97,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
         </div>
       )}
       {node.kind === "output" && (
-        <OutputMeter level={data.level} ceilingDb={data.ceilingDb} onCeiling={actions.setCeiling} />
+        <OutputMeter ceilingDb={data.ceilingDb} onCeiling={actions.setCeiling} />
       )}
       {(errors[0] ?? warning) && (
         <p className={`sf-node-issue ${errors[0] ? "error" : "warning"}`}>{(errors[0] ?? warning)!.message}</p>

@@ -10,7 +10,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { GraphIssue, LevelReading, NodeKind, SessionInfo } from "../api/types";
+import type { GraphIssue, NodeKind, SessionInfo } from "../api/types";
 import {
   type Catalog,
   type EditorDocument,
@@ -19,7 +19,7 @@ import {
   wireId,
   wouldCycle,
 } from "../model/document";
-import type { NodeActions, SfEdge, SfNode } from "./flow";
+import type { NodeActions, SfEdge, SfNode, SfNodeData } from "./flow";
 import { NodeView } from "./NodeView";
 import { ConnectionLine, WireEdge } from "./WireEdge";
 import { WireDropMenu } from "./WireDropMenu";
@@ -33,28 +33,37 @@ interface Props {
   catalog: Catalog;
   issues: GraphIssue[];
   session: SessionInfo;
-  level: LevelReading | null;
   ceilingDb: number;
   selected: Set<string>;
   actions: NodeActions;
   onSelect(ids: Set<string>): void;
-  onMove(positions: Map<string, Position>, done: boolean): void;
+  /** Called with `start` on the first step of a drag, so it undoes as one step. */
+  onMove(positions: Map<string, Position>, start: boolean): void;
   onRemove(nodes: string[], wires: string[]): void;
   onConnect(from: string, to: { node: string; port: string }): void;
   onAdd(kind: NodeKind, position: Position, connectFrom?: string): void;
 }
 
+interface Menu {
+  x: number;
+  y: number;
+  /** Set when opened by dropping a wire from this node. */
+  from?: string;
+}
+
 export function Canvas(props: Props) {
-  const { doc, catalog, issues, session, level, ceilingDb, selected, actions } = props;
+  const { doc, catalog, issues, session, ceilingDb, selected, actions } = props;
   const flow = useReactFlow<SfNode, SfEdge>();
   const [flowNodes, setFlowNodes] = useState<SfNode[]>([]);
   const [selectedWires, setSelectedWires] = useState<Set<string>>(new Set());
-  const [menu, setMenu] = useState<{ x: number; y: number; from: string } | null>(null);
-  const nodesRef = useRef(flowNodes);
-  nodesRef.current = flowNodes;
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const nodesRef = useRef<SfNode[]>([]);
+  const pointer = useRef({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const canvas = useRef<HTMLDivElement>(null);
 
-  // Rebuild node data from the document, keeping React Flow's own fields
-  // (measured size, dragging) from the previous objects.
+  // Rebuild node objects only when their own inputs change, keeping React
+  // Flow's fields (measured size, dragging) from the previous objects.
   useEffect(() => {
     const sourcesByNode = new Map<string, Record<string, string>>();
     for (const wire of doc.wires) {
@@ -62,33 +71,31 @@ export function Canvas(props: Props) {
       sources[wire.to.port] = wire.from;
       sourcesByNode.set(wire.to.node, sources);
     }
-    setFlowNodes((previous) => {
-      const old = new Map(previous.map((node) => [node.id, node]));
-      return doc.nodes.flatMap((node) => {
+    {
+      const old = new Map(nodesRef.current.map((node) => [node.id, node]));
+      nodesRef.current = doc.nodes.flatMap((node) => {
         const descriptor = catalog.get(node.kind);
         if (!descriptor) return [];
         const kept = old.get(node.id);
-        return [{
-          ...kept,
-          id: node.id,
-          type: "sf" as const,
-          position: kept?.dragging ? kept.position : node.position,
-          selected: selected.has(node.id),
-          data: {
-            node,
-            descriptor,
-            ports: inputPorts(node, catalog),
-            sources: sourcesByNode.get(node.id) ?? {},
-            issues: issues.filter((issue) => issue.node === node.id),
-            session,
-            level: node.kind === "output" ? level : null,
-            ceilingDb,
-            actions,
-          },
-        }];
+        const data: SfNodeData = {
+          node,
+          descriptor,
+          ports: inputPorts(node, catalog),
+          sources: sourcesByNode.get(node.id) ?? {},
+          issues: issues.filter((issue) => issue.node === node.id),
+          session,
+          ceilingDb,
+          actions,
+        };
+        const sameData = kept && sameNodeData(kept.data, data);
+        const position = kept?.dragging ? kept.position : node.position;
+        const isSelected = selected.has(node.id);
+        if (kept && sameData && kept.position === position && Boolean(kept.selected) === isSelected) return [kept];
+        return [{ ...kept, id: node.id, type: "sf" as const, position, selected: isSelected, data: sameData ? kept.data : data }];
       });
-    });
-  }, [doc, catalog, issues, session, level, ceilingDb, selected, actions]);
+      setFlowNodes(nodesRef.current);
+    }
+  }, [doc, catalog, issues, session, ceilingDb, selected, actions]);
 
   const edges = useMemo<SfEdge[]>(
     () =>
@@ -128,8 +135,28 @@ export function Canvas(props: Props) {
     setMenu({ x: point.clientX, y: point.clientY, from: state.fromNode.id });
   }, []);
 
+  // Tab opens the same menu, unfiltered, where the pointer is.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof Element && target !== document.body && !canvas.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("input, textarea, button, [role='menu']")) return;
+      event.preventDefault();
+      const box = canvas.current?.getBoundingClientRect();
+      const inside = box && pointer.current.x >= box.left && pointer.current.x <= box.right
+        && pointer.current.y >= box.top && pointer.current.y <= box.bottom;
+      setMenu(inside ? { ...pointer.current } : { x: (box?.left ?? 0) + 80, y: (box?.top ?? 0) + 80 });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
-    <div className="canvas"
+    <div className="canvas" ref={canvas}
+      onPointerMove={(event) => {
+        pointer.current = { x: event.clientX, y: event.clientY };
+      }}
       onDragOver={(event) => {
         if (event.dataTransfer.types.includes(DRAG_KIND)) {
           event.preventDefault();
@@ -157,32 +184,17 @@ export function Canvas(props: Props) {
         isValidConnection={isValidConnection}
         deleteKeyCode={["Backspace", "Delete"]}
         onNodesChange={(changes) => {
-          const next = changes.applyTo(nodesRef.current);
-          setFlowNodes(next);
-          const moved = new Map<string, Position>();
-          let dragging = false;
-          for (const node of next) {
-            const current = doc.nodes.find((candidate) => candidate.id === node.id);
-            if (current && (current.position.x !== node.position.x || current.position.y !== node.position.y)) {
-              moved.set(node.id, node.position);
-            }
-            dragging ||= Boolean(node.dragging);
-          }
-          if (moved.size > 0) props.onMove(moved, !dragging);
-          const nextSelected = new Set(next.filter((node) => node.selected).map((node) => node.id));
-          if (nextSelected.size !== selected.size || [...nextSelected].some((id) => !selected.has(id))) {
-            props.onSelect(nextSelected);
-          }
-          const remaining = new Set(next.map((node) => node.id));
-          const removed = doc.nodes.filter((node) => !remaining.has(node.id)).map((node) => node.id);
-          if (removed.length > 0) props.onRemove(removed, []);
+          // Removals go through onDelete as one edit; here only layout and selection.
+          nodesRef.current = changes.applyTo(nodesRef.current);
+          setFlowNodes(nodesRef.current);
+          reconcile(nodesRef.current);
         }}
         onEdgesChange={(changes) => {
           const next = changes.applyTo(edges);
-          const remaining = new Set(next.map((edge) => edge.id));
-          const removed = edges.filter((edge) => !remaining.has(edge.id)).map((edge) => edge.id);
-          if (removed.length > 0) props.onRemove([], removed);
           setSelectedWires(new Set(next.filter((edge) => edge.selected).map((edge) => edge.id)));
+        }}
+        onDelete={({ nodes, edges: wires }) => {
+          props.onRemove(nodes.map((node) => node.id), wires.map((edge) => edge.id));
         }}
         onConnect={(connection) => {
           if (connection.targetHandle) props.onConnect(connection.source, { node: connection.target, port: connection.targetHandle });
@@ -206,9 +218,47 @@ export function Canvas(props: Props) {
             props.onAdd(kind, flow.screenToFlowPosition({ x: menu.x, y: menu.y }), menu.from);
             setMenu(null);
           }}
-          onClose={() => setMenu(null)}
+          onClose={() => {
+            setMenu(null);
+            canvas.current?.querySelector<HTMLElement>(".react-flow__pane")?.focus();
+          }}
         />
       )}
     </div>
+  );
+
+  function reconcile(next: SfNode[]) {
+    const moved = new Map<string, Position>();
+    let anyDragging = false;
+    for (const node of next) {
+      const current = doc.nodes.find((candidate) => candidate.id === node.id);
+      if (current && (current.position.x !== node.position.x || current.position.y !== node.position.y)) {
+        moved.set(node.id, node.position);
+      }
+      anyDragging ||= Boolean(node.dragging);
+    }
+    if (moved.size > 0) {
+      props.onMove(moved, !dragging.current);
+      dragging.current = anyDragging;
+    } else if (!anyDragging) {
+      dragging.current = false;
+    }
+    const nextSelected = new Set(next.filter((node) => node.selected).map((node) => node.id));
+    if (nextSelected.size !== selected.size || [...nextSelected].some((id) => !selected.has(id))) {
+      props.onSelect(nextSelected);
+    }
+  }
+}
+
+function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
+  return (
+    a.node === b.node &&
+    a.descriptor === b.descriptor &&
+    a.session === b.session &&
+    a.ceilingDb === b.ceilingDb &&
+    a.actions === b.actions &&
+    JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
+    JSON.stringify(a.sources) === JSON.stringify(b.sources) &&
+    JSON.stringify(a.issues) === JSON.stringify(b.issues)
   );
 }

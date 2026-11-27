@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 
-import type { LevelReading } from "../api/types";
 import { formatDb } from "../model/signal";
+import { LevelContext } from "./flow";
 
 const FLOOR_DB = -48;
 const SEGMENTS = 24;
@@ -12,11 +12,8 @@ const PEAK_HOLD_MS = 1500;
  * warning threshold only: the engine has no limiter yet, so nothing is
  * attenuated when the level crosses it.
  */
-export function OutputMeter({ level, ceilingDb, onCeiling }: {
-  level: LevelReading | null;
-  ceilingDb: number;
-  onCeiling: (db: number) => void;
-}) {
+export function OutputMeter({ ceilingDb, onCeiling }: { ceilingDb: number; onCeiling: (db: number) => void }) {
+  const level = useContext(LevelContext);
   const db = level?.peak_dbfs ?? null;
   const [hold, setHold] = useState<number | null>(null);
   const heldAt = useRef(0);

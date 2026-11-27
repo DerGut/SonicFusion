@@ -76,12 +76,18 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .toggle input { accent-color: var(--control); margin: 0; }
 
 .status-pill {
+  min-width: 0;
   display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 12px; border-radius: 16px;
   border: 1px solid var(--edge); background: #15181d; font-size: 12px; max-width: 640px; overflow: hidden;
 }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .status-main { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-meta { color: var(--muted); white-space: nowrap; }
+.status-detail { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.status-pill.warning { background: #1e1a10; border-color: #4a3d1a; }
+.status-pill.warning .dot { background: var(--hot); }
+.status-pill.warning .status-main { color: #fde68a; }
+.status-pill.neutral .dot { background: var(--text-2); }
 .status-pill.ok { background: #15201a; border-color: #23402e; }
 .status-pill.ok .dot { background: var(--ok); }
 .status-pill.ok .status-main { color: #bbf7d0; }
@@ -127,7 +133,6 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
 /* Canvas */
 .canvas { position: relative; flex: 1; min-height: 0; background: var(--canvas); }
-.canvas > .react-flow { position: absolute; inset: 0; }
 .param-top .value { white-space: nowrap; }
 .react-flow { --xy-background-color: var(--canvas); }
 .react-flow__controls, .react-flow__minimap { border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 1px var(--edge); }
@@ -210,9 +215,10 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .drop-menu-title { padding: 10px 12px 8px; font-size: 12px; font-weight: 600; }
 .drop-menu-title code { color: #f5c68a; font-size: 11.5px; }
 .drop-menu input { display: block; width: calc(100% - 20px); margin: 0 10px 8px; height: 32px; padding: 0 10px; border: 1px solid var(--edge); border-radius: 7px; background: #0f1216; font-size: 12px; }
-.drop-menu-items { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 6px; }
+.drop-menu-items { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0 6px 6px; list-style: none; }
+.drop-menu-items button { width: 100%; }
 .drop-menu-items button { height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; font-size: 12.5px; text-align: left; }
-.drop-menu-items button:hover, .drop-menu-items button:focus-visible { background: #22324a; }
+.drop-menu-items button:hover, .drop-menu-items button.active { background: #22324a; }
 .drop-menu-items .hint { font-family: var(--mono); font-size: 11px; }
 .drop-menu-foot { margin: 0; padding: 8px 12px; border-top: 1px solid #262c35; font-size: 11px; color: var(--muted); }
 
@@ -233,6 +239,8 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .plot-label { position: absolute; left: 8px; top: 6px; color: var(--faint); font-size: 10px; font-family: var(--mono); pointer-events: none; }
 .plot-message { margin: 0; padding: 16px; color: var(--muted); }
 .plot-message.error { color: var(--error-soft); }
+.draft-tag { padding: 1px 6px; border-radius: 4px; background: #1e1a10; color: #fde68a; font-size: 11px; }
+.crash { display: grid; place-items: center; gap: 12px; height: 100%; text-align: center; color: var(--text-2); }
 .readouts { width: 220px; flex: none; margin: 0; display: flex; flex-direction: column; gap: 9px; padding-top: 4px; }
 .readouts div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
 .readouts dt { color: var(--muted); }

@@ -4,26 +4,40 @@ use datafusion::execution::TaskContext;
 use futures::TryStreamExt;
 use sonicfusion::{ExecutionConfig, FrameDecoder, dsl::build_live_plan};
 use sonicfusion_graph_api::{
-    GraphIssue, GraphSpec, IssueCode, ModulationMapping, NodeId, NodeKind, SessionInfo, has_errors,
-    upstream_of, validate,
+    GraphIssue, GraphSpec, IssueCode, ModulationMapping, NodeId, NodeKind, SessionInfo, Severity,
+    has_errors, upstream_of, validate, validate_upstream,
 };
 
 use crate::lower::{Lowered, lower};
 
 /// Frames rendered and discarded before a probe window so filter history has
-/// settled; probes are recomputed, not tapped from the playing stream.
-const PROBE_WARMUP_FRAMES: u64 = 4_800;
+/// settled; probes are recomputed, not tapped from the playing stream. Slow
+/// filters get a longer warm-up, up to two seconds of audio, so probes of
+/// cutoffs below about 0.5 Hz (under the catalog's 20 Hz minimum) are approximate.
+const MIN_WARMUP_FRAMES: u64 = 4_800;
+const MAX_WARMUP_SECONDS: u64 = 2;
 /// Upper bound on a single probe so a caller can't stall the host.
 const MAX_PROBE_FRAMES: usize = 1 << 16;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
-    #[error("the graph has {} problem(s)", .0.len())]
+    #[error("{}", invalid_summary(.0))]
     Invalid(Vec<GraphIssue>),
     #[error("engine error: {0}")]
     Engine(String),
     #[error("no session is running")]
     NoSession,
+}
+
+fn invalid_summary(issues: &[GraphIssue]) -> String {
+    let errors = issues
+        .iter()
+        .filter(|issue| issue.severity == Severity::Error)
+        .count();
+    match errors {
+        1 => "the graph has 1 error".into(),
+        count => format!("the graph has {count} errors"),
+    }
 }
 
 /// Shared host context: fixed execution settings plus a Tokio runtime for
@@ -51,10 +65,12 @@ impl Drop for Inner {
 impl Engine {
     /// The session settings used by `live_runtime`: 48 kHz, 1024-frame batches.
     pub fn new() -> Result<Self, HostError> {
-        Self::with_config(ExecutionConfig::default())
+        Self::with_settings(48_000, 1024)
     }
 
-    pub fn with_config(config: ExecutionConfig) -> Result<Self, HostError> {
+    pub fn with_settings(sample_rate_hz: u32, batch_frames: usize) -> Result<Self, HostError> {
+        let config = ExecutionConfig::new(sample_rate_hz, batch_frames)
+            .map_err(|error| HostError::Engine(error.to_string()))?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("sonicfusion-host")
@@ -63,7 +79,7 @@ impl Engine {
             .map_err(|error| HostError::Engine(format!("cannot start host runtime: {error}")))?;
         Ok(Self {
             inner: Arc::new(Inner {
-                config: config.at_frame(0),
+                config,
                 runtime: Some(runtime),
             }),
         })
@@ -86,7 +102,7 @@ impl Engine {
     pub fn lower(&self, graph: &GraphSpec) -> Result<Lowered, HostError> {
         let issues = self.validate(graph);
         if has_errors(&issues) {
-            return Err(HostError::Invalid(issues));
+            return Err(HostError::Invalid(errors_only(issues)));
         }
         lower(graph, &output_id(graph)?).map_err(HostError::Invalid)
     }
@@ -101,29 +117,32 @@ impl Engine {
         start_frame: u64,
         frames: usize,
     ) -> Result<Vec<f32>, HostError> {
+        self.probe_since(graph, node, start_frame, frames, 0).await
+    }
+
+    /// Like [`Engine::probe`], but never renders history before `earliest`,
+    /// e.g. the frame a replacement started from fresh state.
+    pub(crate) async fn probe_since(
+        &self,
+        graph: &GraphSpec,
+        node: &NodeId,
+        start_frame: u64,
+        frames: usize,
+        earliest: u64,
+    ) -> Result<Vec<f32>, HostError> {
         if frames == 0 || frames > MAX_PROBE_FRAMES {
             return Err(HostError::Engine(format!(
                 "probe length must be between 1 and {MAX_PROBE_FRAMES} frames"
             )));
         }
-        let Some(spec) = graph.node(node) else {
-            return Err(HostError::Engine(format!("unknown node {:?}", node.0)));
-        };
-        let root = spec.id.clone();
-        let upstream = upstream_of(graph, &root);
-        let blocking: Vec<_> = self
-            .validate(graph)
-            .into_iter()
-            .filter(|issue| {
-                issue.severity == sonicfusion_graph_api::Severity::Error
-                    && issue.node.as_ref().is_some_and(|id| upstream.contains(id))
-            })
-            .collect();
-        if !blocking.is_empty() {
-            return Err(HostError::Invalid(blocking));
+        let issues = validate_upstream(graph, &self.info(), node);
+        if has_errors(&issues) {
+            return Err(HostError::Invalid(errors_only(issues)));
         }
-        let lowered = lower(graph, &root).map_err(HostError::Invalid)?;
-        let warmup = start_frame.min(PROBE_WARMUP_FRAMES);
+        let lowered = lower(graph, node).map_err(HostError::Invalid)?;
+        let warmup = self
+            .warmup_frames(graph, node)
+            .min(start_frame.saturating_sub(earliest));
         let config = self.inner.config.at_frame(start_frame - warmup);
         let wanted = usize::try_from(warmup).expect("warm-up fits usize") + frames;
         self.runtime()
@@ -156,6 +175,40 @@ impl Engine {
             .map_err(|error| HostError::Engine(format!("probe task failed: {error}")))?
     }
 
+    /// Long enough for the slowest one-pole filter feeding `node` to settle
+    /// (eight time constants), within fixed bounds.
+    fn warmup_frames(&self, graph: &GraphSpec, node: &NodeId) -> u64 {
+        let rate = f64::from(self.inner.config.sample_rate_hz());
+        let modulation = self.info().cutoff_modulation;
+        let upstream = upstream_of(graph, node);
+        let wired = sonicfusion_graph_api::input_map(graph);
+        let slowest_hz = graph
+            .nodes
+            .iter()
+            .filter(|spec| upstream.contains(&spec.id))
+            .filter_map(|spec| match spec.kind {
+                NodeKind::LowPass { cutoff_hz } => {
+                    let modulated = wired.contains_key(&sonicfusion_graph_api::PortRef {
+                        node: spec.id.clone(),
+                        port: "cutoff".into(),
+                    });
+                    Some(if modulated {
+                        modulation.base_hz - modulation.depth_hz
+                    } else {
+                        cutoff_hz
+                    })
+                }
+                _ => None,
+            })
+            .fold(f64::INFINITY, f64::min);
+        let max = MAX_WARMUP_SECONDS * u64::from(self.inner.config.sample_rate_hz());
+        if !slowest_hz.is_finite() || slowest_hz <= 0.0 {
+            return MIN_WARMUP_FRAMES;
+        }
+        let settle = (8.0 * rate / (2.0 * std::f64::consts::PI * slowest_hz)).ceil() as u64;
+        settle.clamp(MIN_WARMUP_FRAMES, max)
+    }
+
     pub(crate) fn config(&self) -> ExecutionConfig {
         self.inner.config
     }
@@ -167,6 +220,13 @@ impl Engine {
             .expect("runtime lives until drop")
             .handle()
     }
+}
+
+fn errors_only(issues: Vec<GraphIssue>) -> Vec<GraphIssue> {
+    issues
+        .into_iter()
+        .filter(|issue| issue.severity == Severity::Error)
+        .collect()
 }
 
 pub(crate) fn output_id(graph: &GraphSpec) -> Result<NodeId, HostError> {
@@ -240,6 +300,78 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(error, HostError::Invalid(issues) if issues[0].node == Some(NodeId::new("gain")))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn slow_filters_get_enough_warm_up() {
+        let engine = Engine::new().unwrap();
+        let graph: GraphSpec = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {"id": "sq", "kind": "square", "params": {"frequency_hz": 50.0, "pulse_width": 0.9}},
+                {"id": "lpf", "kind": "low_pass", "params": {"cutoff_hz": 2.0}}
+            ],
+            "wires": [{"from": "sq", "to": {"node": "lpf", "port": "in"}}]
+        }))
+        .unwrap();
+        let continuous = engine
+            .probe(&graph, &NodeId::new("lpf"), 0, 60_000)
+            .await
+            .unwrap();
+        let probed = engine
+            .probe(&graph, &NodeId::new("lpf"), 59_000, 1_000)
+            .await
+            .unwrap();
+        let error = continuous[59_000..]
+            .iter()
+            .zip(&probed)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(error < 1e-3, "max deviation {error}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fan_out_means_the_same_signal_twice() {
+        let engine = Engine::new().unwrap();
+        let mut graph = fixture();
+        graph.nodes.push(sonicfusion_graph_api::NodeSpec {
+            id: NodeId::new("both"),
+            kind: NodeKind::Mix {
+                weights: vec![0.5, 0.5],
+            },
+        });
+        for port in ["in.0", "in.1"] {
+            graph.wires.push(sonicfusion_graph_api::Wire {
+                from: NodeId::new("lpf"),
+                to: sonicfusion_graph_api::PortRef {
+                    node: NodeId::new("both"),
+                    port: port.into(),
+                },
+            });
+        }
+        let single = engine
+            .probe(&graph, &NodeId::new("lpf"), 9_000, 512)
+            .await
+            .unwrap();
+        let doubled = engine
+            .probe(&graph, &NodeId::new("both"), 9_000, 512)
+            .await
+            .unwrap();
+        for (a, b) in single.iter().zip(&doubled) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn errors_count_only_errors() {
+        let issues = vec![
+            GraphIssue::error(IssueCode::MissingInput, None, "a"),
+            GraphIssue::warning(IssueCode::Unreachable, None, "b"),
+        ];
+        assert_eq!(
+            HostError::Invalid(issues).to_string(),
+            "the graph has 1 error"
         );
     }
 

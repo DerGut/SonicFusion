@@ -231,7 +231,10 @@ mod tests {
             std::fs::write(path, &current).unwrap();
         }
         let checked_in = std::fs::read_to_string(path).unwrap_or_default();
-        assert_eq!(checked_in, current, "run with UPDATE_FIXTURES=1 to refresh {path}");
+        assert_eq!(
+            checked_in, current,
+            "run with UPDATE_FIXTURES=1 to refresh {path}"
+        );
     }
 
     #[test]
