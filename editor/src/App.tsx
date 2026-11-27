@@ -22,6 +22,7 @@ import {
   moveNodes,
   moveWire,
   nextNodeId,
+  nodeLabel,
   parseDocument,
   removeMixInput,
   removeNodes,
@@ -289,6 +290,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
               playing={playing}
               draft={engine.dirty}
               session={session}
+              onRename={actions.renameNode}
               onClose={() => setSelected(new Set())}
             />
           )}
@@ -298,7 +300,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
         nodes={doc.nodes.length}
         wires={doc.wires.length}
         issues={shownIssues}
-        selected={selectedNode?.id ?? null}
+        selected={selectedNode ? nodeLabel(selectedNode) : null}
         pending={engine.dirty}
         onFocus={focus}
       />

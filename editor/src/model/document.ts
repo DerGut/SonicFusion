@@ -193,6 +193,12 @@ export function moveNodes(doc: EditorDocument, positions: Map<string, Position>)
   };
 }
 
+/** Include the stable ID so duplicate display names are distinguishable. */
+export function nodeLabel(node: DocNode): string {
+  const name = node.displayName?.trim();
+  return name ? `${name} (${node.id})` : node.id;
+}
+
 export function renameNode(doc: EditorDocument, id: string, name: string): EditorDocument {
   const node = doc.nodes.find((candidate) => candidate.id === id);
   const displayName = name.trim();

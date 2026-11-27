@@ -1,17 +1,22 @@
 import { useRef, useState } from "react";
 
-import type { DocNode } from "../model/document";
-import { Icon } from "./icons";
+import { type DocNode, nodeLabel } from "../model/document";
 
-export function NodeTitle({ node, onRename }: { node: DocNode; onRename: (id: string, name: string) => void }) {
+export function NodeTitle({ node, onRename, inProbe = false }: {
+  node: DocNode;
+  onRename: (id: string, name: string) => void;
+  inProbe?: boolean;
+}) {
   const [renaming, setRenaming] = useState(false);
   const restoreFocus = useRef(false);
-  const title = node.displayName?.trim() || node.id;
+  const name = node.displayName?.trim();
+  const label = nodeLabel(node);
+  const titleClass = inProbe ? "probe-title" : `sf-node-title${name ? "" : " sf-node-id"}`;
 
   return (
     renaming ? (
-      <input className="sf-node-title sf-node-title-input nodrag" autoFocus
-        aria-label="Node display name" defaultValue={node.displayName ?? ""} placeholder={node.id}
+      <input className={inProbe ? "probe-title-input" : "sf-node-title sf-node-title-input nodrag"}
+        autoFocus aria-label={`Display name for ${node.id}`} defaultValue={name ?? ""} placeholder={node.id}
         onFocus={(event) => event.currentTarget.select()}
         onBlur={(event) => {
           if (!restoreFocus.current) onRename(node.id, event.currentTarget.value);
@@ -29,19 +34,23 @@ export function NodeTitle({ node, onRename }: { node: DocNode; onRename: (id: st
         }} />
     ) : (
       <>
-        <span className="sf-node-title" title={title}>{title}</span>
-        <button type="button" className="icon-button sf-node-rename nodrag nokey"
-          title={`Rename ${title}`} aria-label={`Rename node ${title}`} onClick={() => setRenaming(true)}
+        <button type="button" className={`node-title-button ${titleClass} nokey`}
+          title={`${label} · ${inProbe ? "click" : "double-click"} to rename`} aria-label={`Rename node ${label}`}
+          onClick={(event) => {
+            // Native keyboard activation has no click count. Pointer clicks
+            // on the canvas title retain the usual node selection and drag.
+            if (inProbe || event.detail === 0) setRenaming(true);
+          }}
+          onDoubleClick={inProbe ? undefined : () => setRenaming(true)}
           ref={(button) => {
-            // Return from Enter/Escape to the button. A blur from Tab or
-            // a click elsewhere should let focus continue on its way.
             if (button && restoreFocus.current) {
               restoreFocus.current = false;
               button.focus();
             }
           }}>
-          <Icon name="edit" size={12} />
+          {inProbe ? `${label} › out` : name || node.id}
         </button>
+        {!inProbe && name && <span className="sf-node-id sf-node-id-chip" title={node.id}>{node.id}</span>}
       </>
     )
   );

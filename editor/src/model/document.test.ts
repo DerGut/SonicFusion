@@ -12,6 +12,7 @@ import {
   disconnect,
   inputPorts,
   moveWire,
+  nodeLabel,
   parseDocument,
   removeMixInput,
   removeNodes,
@@ -37,6 +38,8 @@ describe("document", () => {
     const reopened = parseDocument(JSON.stringify(named));
     expect(reopened.nodes.filter((node) => node.displayName === "LFO").map((node) => node.id))
       .toEqual(["osc_b", "lfo"]);
+    expect(reopened.nodes.filter((node) => node.displayName === "LFO").map(nodeLabel))
+      .toEqual(["LFO (osc_b)", "LFO (lfo)"]);
     expect(toGraph(reopened)).toEqual(toGraph(doc));
     expect(renameNode(named, "lfo", "LFO")).toBe(named);
     expect(renameNode(named, "missing", "LFO")).toBe(named);
@@ -47,6 +50,7 @@ describe("document", () => {
     const named = renameNode(doc, "lfo", "Modulator");
     const cleared = renameNode(named, "lfo", "  ");
     expect(parseDocument(JSON.stringify(cleared))).toEqual(doc);
+    expect(nodeLabel(cleared.nodes.find((node) => node.id === "lfo")!)).toBe("lfo");
     expect(renameNode(cleared, "lfo", "")).toBe(cleared);
   });
 

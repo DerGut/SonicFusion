@@ -16,6 +16,7 @@ import {
   type EditorDocument,
   type Position,
   inputPorts,
+  nodeLabel,
   wireId,
   wouldCycle,
 } from "../model/document";
@@ -70,11 +71,12 @@ export function Canvas(props: Props) {
   // Rebuild node objects only when their own inputs change, keeping React
   // Flow's fields (measured size, dragging) from the previous objects.
   useEffect(() => {
-    const sourcesByNode = new Map<string, Record<string, string>>();
+    const sourcesByNode = new Map<string, SfNodeData["sources"]>();
+    const labelsById = new Map(doc.nodes.map((node) => [node.id, nodeLabel(node)]));
     const outgoingByNode = new Map<string, string[]>();
     for (const wire of doc.wires) {
       const sources = sourcesByNode.get(wire.to.node) ?? {};
-      sources[wire.to.port] = wire.from;
+      sources[wire.to.port] = { id: wire.from, label: labelsById.get(wire.from) ?? wire.from };
       sourcesByNode.set(wire.to.node, sources);
       outgoingByNode.set(wire.from, [...(outgoingByNode.get(wire.from) ?? []), wireId(wire)]);
     }

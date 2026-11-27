@@ -16,7 +16,7 @@ export function StatusBar({ nodes, wires, issues, selected, pending, onFocus }: 
   return (
     <footer className="statusbar">
       <span>{nodes} nodes · {wires} wires</span>
-      {selected && <span>{selected} selected</span>}
+      {selected && <span className="status-selected" title={`${selected} selected`}>{selected} selected</span>}
       {issues.length === 0 ? (
         <span className="ok"><Icon name="check" size={12} /> {pending ? "Ready to apply" : "No problems"}</span>
       ) : (
