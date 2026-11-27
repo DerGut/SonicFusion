@@ -30,7 +30,7 @@ export function StatusBar({ nodes, wires, issues, selected, pending, onFocus }: 
         </button>
       )}
       <span className="spacer" />
-      <span className="hint">Drag from a port to connect · Delete removes the selection · Applying restarts filter state</span>
+      <span className="hint">Drag an output to connect · drag a connected input to move or detach its wire · ⌥-drag an output to hand a wire to another output · Applying restarts filter state</span>
     </footer>
   );
 }

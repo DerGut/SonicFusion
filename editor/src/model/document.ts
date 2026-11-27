@@ -158,6 +158,16 @@ export function connect(doc: EditorDocument, from: string, to: PortRef): EditorD
   return { ...doc, wires: [...wires, { from, to }] };
 }
 
+/**
+ * Move an existing wire to a new source and/or input, as when its end is
+ * picked up and dropped elsewhere. Loops are refused and leave it in place.
+ */
+export function moveWire(doc: EditorDocument, wire: Wire, from: string, to: PortRef): EditorDocument {
+  const without = { ...doc, wires: doc.wires.filter((candidate) => wireId(candidate) !== wireId(wire)) };
+  const moved = connect(without, from, to);
+  return moved === without ? doc : moved;
+}
+
 export function disconnect(doc: EditorDocument, to: PortRef): EditorDocument {
   return { ...doc, wires: doc.wires.filter((wire) => !samePort(wire.to, to)) };
 }

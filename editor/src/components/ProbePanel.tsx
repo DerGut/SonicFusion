@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { EngineClient } from "../api/client";
-import type { GraphSpec, ProbeWindow, SessionInfo } from "../api/types";
+import { type GraphSpec, type ProbeWindow, type SessionInfo, isCommandError } from "../api/types";
 import type { DocNode } from "../model/document";
 import { formatDb, formatHz, spectrumDb, triggerIndex } from "../model/signal";
 import { describe } from "../state/useEngineSession";
@@ -29,7 +29,8 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
 }) {
   const [view, setView] = useState<"scope" | "spectrum">("scope");
   const [probe, setProbe] = useState<ProbeWindow | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** Why there is no signal: an unfinished branch is normal while editing. */
+  const [unavailable, setUnavailable] = useState<{ text: string; problem: boolean } | null>(null);
   const graphJson = JSON.stringify(graph);
 
   useEffect(() => {
@@ -42,9 +43,13 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
         .then((result) => {
           if (cancelled) return;
           setProbe(result);
-          setError(null);
+          setUnavailable(null);
         })
-        .catch((reason) => !cancelled && setError(describe(reason)))
+        .catch((reason) => {
+          if (cancelled) return;
+          setProbe(null);
+          setUnavailable(whyUnavailable(reason));
+        })
         .finally(() => {
           if (!cancelled && playing) timer = setTimeout(run, LIVE_INTERVAL_MS);
         });
@@ -77,15 +82,19 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
         </div>
         {draft && <span className="draft-tag" title="The probe follows your edits; the meter follows what is playing">draft, not applied</span>}
         <span className="hint">
-          {probe ? `recomputed by the ${client.live ? "engine" : "mock engine"} at frame ${probe.start_frame}` : "probing…"}
+          {probe
+            ? `rendered by the ${client.live ? "engine" : "mock engine"} at frame ${probe.start_frame} · drawn here`
+            : unavailable
+              ? "no signal"
+              : "probing…"}
         </span>
         <span className="spacer" />
         <button type="button" className="icon-button" aria-label="Close probe" onClick={onClose}><Icon name="close" size={12} /></button>
       </div>
       <div className="probe-body">
         <div className="plot" id="probe-plot" role="tabpanel" aria-label={view === "scope" ? "Scope" : "Spectrum"}>
-          {error ? (
-            <p className="plot-message error">{error}</p>
+          {unavailable ? (
+            <p className={`plot-message${unavailable.problem ? " error" : ""}`}>{unavailable.text}</p>
           ) : view === "scope" ? (
             <Scope samples={samples} rate={rate} />
           ) : (
@@ -96,7 +105,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
           </span>
         </div>
         <dl className="readouts">
-          <div><dt>Peak</dt><dd>{formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS</dd></div>
+          <div><dt>Peak</dt><dd>{probe ? `${formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS` : "—"}</dd></div>
           <div><dt>Strongest partial</dt><dd>{spectrum.length ? formatHz((peakBin * rate) / PROBE_FRAMES) : "—"}</dd></div>
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
           <div><dt>Window</dt><dd>{PROBE_FRAMES} frames</dd></div>
@@ -104,6 +113,17 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
       </div>
     </section>
   );
+}
+
+/** Turn a probe failure into a message; missing inputs are just unfinished work. */
+function whyUnavailable(reason: unknown): { text: string; problem: boolean } {
+  if (isCommandError(reason)) {
+    const missing = reason.issues.find((issue) => issue.code === "missing_input");
+    if (missing?.node) {
+      return { text: `Connect ${missing.node}'s "${missing.port ?? "in"}" input to see this signal.`, problem: false };
+    }
+  }
+  return { text: describe(reason), problem: true };
 }
 
 function Scope({ samples, rate }: { samples: number[]; rate: number }) {

@@ -11,6 +11,7 @@ import {
   connect,
   disconnect,
   inputPorts,
+  moveWire,
   parseDocument,
   removeMixInput,
   removeNodes,
@@ -45,6 +46,22 @@ describe("document", () => {
     const doc = connect(studio(), "osc_b", { node: "mix", port: "in.0" });
     const into = doc.wires.filter((wire) => wire.to.node === "mix" && wire.to.port === "in.0");
     expect(into).toEqual([{ from: "osc_b", to: { node: "mix", port: "in.0" } }]);
+  });
+
+  it("moves a picked-up wire to another input or source", () => {
+    const doc = studio();
+    const lfoWire = doc.wires.find((wire) => wire.from === "lfo")!;
+    const retargeted = moveWire(doc, lfoWire, "lfo", { node: "mix", port: "in.1" });
+    expect(retargeted.wires).toContainEqual({ from: "lfo", to: { node: "mix", port: "in.1" } });
+    expect(retargeted.wires.some((wire) => wire.to.port === "cutoff")).toBe(false);
+    expect(retargeted.wires.filter((wire) => wire.to.node === "mix" && wire.to.port === "in.1")).toHaveLength(1);
+
+    const resourced = moveWire(doc, lfoWire, "osc_b", { node: "lpf", port: "cutoff" });
+    expect(resourced.wires).toContainEqual({ from: "osc_b", to: { node: "lpf", port: "cutoff" } });
+    expect(resourced.wires.some((wire) => wire.from === "lfo")).toBe(false);
+
+    const gainWire = doc.wires.find((wire) => wire.from === "gain")!;
+    expect(moveWire(doc, gainWire, "gain", { node: "mix", port: "in.0" })).toBe(doc);
   });
 
   it("refuses wires that would close a loop", () => {

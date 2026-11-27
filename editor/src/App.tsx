@@ -20,6 +20,7 @@ import {
   catalogMap,
   connect,
   moveNodes,
+  moveWire,
   nextNodeId,
   parseDocument,
   removeMixInput,
@@ -264,6 +265,16 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
                 if (nodes.length > 0) setSelected(new Set());
               }}
               onConnect={(from, to) => edit((current) => connect(current, from, to))}
+              onBeginWireMove={() => dispatch({ type: "checkpoint" })}
+              onMoveWire={(wire, from, to) =>
+                edit(
+                  (current) =>
+                    to
+                      ? moveWire(current, wire, from, to)
+                      : { ...current, wires: current.wires.filter((candidate) => wireId(candidate) !== wireId(wire)) },
+                  false,
+                )
+              }
               onAdd={add}
             />
           </LevelContext.Provider>

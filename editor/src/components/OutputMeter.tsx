@@ -59,8 +59,13 @@ export function OutputMeter({ ceilingDb, onCeiling }: { ceilingDb: number; onCei
       </div>
       <input id="output-ceiling" className="ceiling" type="range" min={FLOOR_DB} max={0} step={0.5}
         value={ceilingDb} onChange={(event) => onCeiling(Number(event.target.value))} />
-      <p className={`meter-status${over ? " over" : ""}`}>
-        {over ? "Above the warning level · not limited" : hold !== null ? `Peak ${formatDb(hold)}` : "Engine output, recomputed"}
+      <p className={`meter-status${over ? " over" : ""}`}
+        title="The marker only warns: the engine has no limiter, so nothing is turned down.">
+        {over
+          ? `Peak is over your ${formatDb(ceilingDb)} warning`
+          : hold !== null
+            ? `Peak ${formatDb(hold)}`
+            : "Engine output, recomputed"}
       </p>
     </div>
   );

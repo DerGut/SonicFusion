@@ -3,7 +3,8 @@ import { memo } from "react";
 
 import type { PortDescriptor } from "../api/types";
 import { formatHz } from "../model/signal";
-import { IO_PORT_TOP, type SfNode, rowPortTop } from "./flow";
+import { wireId } from "../model/document";
+import { IO_PORT_TOP, type SfNode, pickUpWire, rowPortTop } from "./flow";
 import { KindIcon } from "./icons";
 import { OutputMeter } from "./OutputMeter";
 import { ParamControl } from "./ParamControl";
@@ -26,11 +27,25 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
 
   const rows: React.ReactNode[] = [];
   const handles: React.ReactNode[] = [];
-  const inputHandle = (port: PortDescriptor, top: number) => (
-    <Handle key={port.name} id={port.name} type="target" position={Position.Left}
-      className={`port ${port.signal}${sources[port.name] ? " connected" : ""}${portIssue(port.name) ? " port-error" : ""}`}
-      style={{ top }} title={portIssue(port.name) ?? `${port.label} (${port.signal})`} />
-  );
+  // A connected input picks up its wire instead of starting a new one.
+  const inputHandle = (port: PortDescriptor, top: number) => {
+    const from = sources[port.name];
+    const wire = from ? wireId({ from, to: { node: node.id, port: port.name } }) : null;
+    const pickUp = (event: React.PointerEvent | React.MouseEvent) => {
+      if (wire && event.button === 0) pickUpWire(event, wire, "target");
+    };
+    return (
+      <Handle key={port.name} id={port.name} type="target" position={Position.Left}
+        className={`port ${port.signal}${from ? " connected" : ""}${portIssue(port.name) ? " port-error" : ""}`}
+        style={{ top }} onPointerDownCapture={pickUp} onMouseDownCapture={pickUp}
+        title={portIssue(port.name) ?? (from ? `${port.label}: drag to move or detach the wire from ${from}` : `${port.label} (${port.signal})`)} />
+    );
+  };
+  // Option-drag on an output moves its newest wire; a plain drag adds one.
+  const moveOutputWire = (event: React.PointerEvent | React.MouseEvent) => {
+    if (event.button !== 0 || !event.altKey || data.outgoing.length === 0) return;
+    pickUpWire(event, data.outgoing[data.outgoing.length - 1], "source");
+  };
 
   if (descriptor.variadic_input) {
     const variadic = descriptor.variadic_input;
@@ -106,7 +121,8 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       {handles}
       {descriptor.has_output && (
         <Handle id="out" type="source" position={Position.Right} className="port audio connected"
-          style={{ top: IO_PORT_TOP }} title="Output (drag to connect)" />
+          style={{ top: IO_PORT_TOP }} onPointerDownCapture={moveOutputWire} onMouseDownCapture={moveOutputWire}
+          title={data.outgoing.length > 0 ? "Output: drag to add a wire, ⌥-drag to hand one to another output" : "Output: drag to connect"} />
       )}
     </div>
   );

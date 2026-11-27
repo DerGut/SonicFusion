@@ -96,6 +96,8 @@ export class MockEngine implements EngineClient {
   }
 
   async probe(graph: GraphSpec, node: string, frames: number): Promise<ProbeWindow> {
+    const missing = missingUpstream(graph, node);
+    if (missing.length > 0) throw error("invalid", `the graph has ${missing.length} error(s)`, missing);
     const start = this.playing ? this.frame() : 0;
     return {
       node,
@@ -160,6 +162,29 @@ function inputNames(node: NodeSpec): string[] {
     default:
       return [];
   }
+}
+
+/** Required inputs left open in `node` or anything feeding it, as the host reports them. */
+function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
+  const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
+  const issues: GraphIssue[] = [];
+  const seen = new Set<string>();
+  const pending = [node];
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const spec = graph.nodes.find((candidate) => candidate.id === id);
+    if (!spec) continue;
+    for (const port of inputNames(spec)) {
+      const from = feeds.get(`${id}:${port}`);
+      if (from) pending.push(from);
+      else issues.push(issue("missing_input", id, `input "${port}" is not connected`, port));
+    }
+    const cutoff = feeds.get(`${id}:cutoff`);
+    if (cutoff) pending.push(cutoff);
+  }
+  return issues;
 }
 
 function mockValidate(graph: GraphSpec): GraphIssue[] {

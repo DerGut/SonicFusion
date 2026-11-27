@@ -19,6 +19,7 @@ import {
   wireId,
   wouldCycle,
 } from "../model/document";
+import type { Wire } from "../api/types";
 import type { NodeActions, SfEdge, SfNode, SfNodeData } from "./flow";
 import { NodeView } from "./NodeView";
 import { ConnectionLine, WireEdge } from "./WireEdge";
@@ -41,6 +42,9 @@ interface Props {
   onMove(positions: Map<string, Position>, start: boolean): void;
   onRemove(nodes: string[], wires: string[]): void;
   onConnect(from: string, to: { node: string; port: string }): void;
+  /** A picked-up wire end was dropped: on a port (`to` set) or on empty canvas. */
+  onBeginWireMove(): void;
+  onMoveWire(wire: Wire, from: string, to: { node: string; port: string } | null): void;
   onAdd(kind: NodeKind, position: Position, connectFrom?: string): void;
 }
 
@@ -59,6 +63,7 @@ export function Canvas(props: Props) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const nodesRef = useRef<SfNode[]>([]);
   const pointer = useRef({ x: 0, y: 0 });
+  const wireMoved = useRef(false);
   const dragging = useRef(false);
   const canvas = useRef<HTMLDivElement>(null);
 
@@ -66,10 +71,12 @@ export function Canvas(props: Props) {
   // Flow's fields (measured size, dragging) from the previous objects.
   useEffect(() => {
     const sourcesByNode = new Map<string, Record<string, string>>();
+    const outgoingByNode = new Map<string, string[]>();
     for (const wire of doc.wires) {
       const sources = sourcesByNode.get(wire.to.node) ?? {};
       sources[wire.to.port] = wire.from;
       sourcesByNode.set(wire.to.node, sources);
+      outgoingByNode.set(wire.from, [...(outgoingByNode.get(wire.from) ?? []), wireId(wire)]);
     }
     {
       const old = new Map(nodesRef.current.map((node) => [node.id, node]));
@@ -82,6 +89,7 @@ export function Canvas(props: Props) {
           descriptor,
           ports: inputPorts(node, catalog),
           sources: sourcesByNode.get(node.id) ?? {},
+          outgoing: outgoingByNode.get(node.id) ?? [],
           issues: issues.filter((issue) => issue.node === node.id),
           session,
           ceilingDb,
@@ -200,6 +208,23 @@ export function Canvas(props: Props) {
           if (connection.targetHandle) props.onConnect(connection.source, { node: connection.target, port: connection.targetHandle });
         }}
         onConnectEnd={onConnectEnd}
+        edgesReconnectable
+        reconnectRadius={14}
+        onReconnectStart={() => {
+          wireMoved.current = false;
+          props.onBeginWireMove();
+        }}
+        onReconnect={(edge, connection) => {
+          const wire = wireOf(edge);
+          if (!wire || !connection.targetHandle) return;
+          wireMoved.current = true;
+          props.onMoveWire(wire, connection.source, { node: connection.target, port: connection.targetHandle });
+        }}
+        onReconnectEnd={(_, edge) => {
+          // Dropped on empty canvas: the wire is detached.
+          const wire = wireOf(edge);
+          if (!wireMoved.current && wire) props.onMoveWire(wire, wire.from, null);
+        }}
         onPaneClick={() => setMenu(null)}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} color="#262C35" />
@@ -250,6 +275,11 @@ export function Canvas(props: Props) {
   }
 }
 
+function wireOf(edge: SfEdge): Wire | null {
+  if (!edge.targetHandle) return null;
+  return { from: edge.source, to: { node: edge.target, port: edge.targetHandle } };
+}
+
 function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
   return (
     a.node === b.node &&
@@ -259,6 +289,7 @@ function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
     a.actions === b.actions &&
     JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
     JSON.stringify(a.sources) === JSON.stringify(b.sources) &&
+    JSON.stringify(a.outgoing) === JSON.stringify(b.outgoing) &&
     JSON.stringify(a.issues) === JSON.stringify(b.issues)
   );
 }

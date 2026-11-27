@@ -23,6 +23,25 @@ export function rowPortTop(index: number): number {
   return HEADER_HEIGHT + IO_HEIGHT + ROW_HEIGHT * index + 16;
 }
 
+/**
+ * Start dragging an existing wire's end, as if its reconnect anchor had been
+ * grabbed. Ports are drawn above those anchors, so a press on a port is
+ * forwarded to the wire that should move.
+ */
+export function pickUpWire(event: React.PointerEvent | React.MouseEvent, wireId: string, end: "source" | "target"): boolean {
+  const edge = [...document.querySelectorAll<SVGElement>(".react-flow__edge")].find(
+    (element) => element.getAttribute("data-id") === wireId,
+  );
+  const anchor = edge?.querySelector<SVGElement>(`.react-flow__edgeupdater-${end}`);
+  if (!anchor) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  anchor.dispatchEvent(
+    new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, button: 0, buttons: 1 }),
+  );
+  return true;
+}
+
 export interface NodeActions {
   setParam(id: string, name: string, value: ParamValue, continuous: boolean): void;
   beginContinuous(): void;
@@ -37,6 +56,8 @@ export interface SfNodeData extends Record<string, unknown> {
   ports: PortDescriptor[];
   /** Connected input port name → the node feeding it. */
   sources: Record<string, string>;
+  /** Ids of the wires leaving this node, oldest first. */
+  outgoing: string[];
   issues: GraphIssue[];
   session: SessionInfo;
   ceilingDb: number;
