@@ -24,13 +24,18 @@ import { ParameterRange, fromSlider, toSlider } from "../components/ParamControl
 
 // ---------------------------------------------------------------- URL state
 
-type Key = "pitch" | "name" | "env" | "seq";
+type Key = "pitch" | "name" | "env" | "seq" | "mel";
 const VARIANTS: Record<Key, { id: string; label: string }[]> = {
   pitch: [
     { id: "A", label: "Current: per-param Hz/Note select" },
     { id: "B", label: "Patch-wide unit, dual readout" },
     { id: "C", label: "Both units, keyboard popover" },
     { id: "D", label: "Per-node unit, role default" },
+  ],
+  mel: [
+    { id: "A", label: "Extend: always notes + pitch out" },
+    { id: "B", label: "Toggle: Notes switch" },
+    { id: "C", label: "Separate Melody node" },
   ],
   seq: [
     { id: "A", label: "Wide node, inline grid" },
@@ -88,6 +93,8 @@ export function PrototypeSwitcher() {
   const name = useVariant("name");
   const env = useVariant("env");
   const seq = useVariant("seq");
+  const mel = useVariant("mel");
+  const notesScenario = new URLSearchParams(window.location.search).get("scenario") === "mel";
   if (!import.meta.env.DEV) return null;
   const group = (key: Key, current: string, issue: string) => {
     const list = VARIANTS[key];
@@ -107,7 +114,7 @@ export function PrototypeSwitcher() {
       {group("pitch", pitch, "#33 pitch")}
       {group("name", name, "#41 name")}
       {group("env", env, "#34 env")}
-      {group("seq", seq, "seq")}
+      {notesScenario ? group("mel", mel, "notes") : group("seq", seq, "seq")}
     </div>
   );
 }

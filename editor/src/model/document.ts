@@ -237,7 +237,7 @@ export function wireId(wire: Wire): string {
   return `${wire.from}->${wire.to.node}:${wire.to.port}`;
 }
 
-const KINDS = new Set<NodeKind>(["sine", "square", "sawtooth", "noise", "gain", "low_pass", "mix", "output", "envelope", "sequencer"]);
+const KINDS = new Set<NodeKind>(["sine", "square", "sawtooth", "noise", "gain", "low_pass", "mix", "output", "envelope", "sequencer", "melody"]);
 
 /**
  * Parse a saved project, checking the shape the editor relies on. The engine

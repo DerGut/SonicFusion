@@ -11,7 +11,8 @@ import { OutputMeter } from "./OutputMeter";
 import { FrequencyModeSelect, ParamControl, type FrequencyMode } from "./ParamControl";
 // PROTOTYPE #33/#41
 import { EnvelopeBody } from "../prototype/envelope.prototype";
-import { SequencerBody, useSequencerWide } from "../prototype/sequencer.prototype";
+import { SequencerBody, openPattern, useSequencerWide } from "../prototype/sequencer.prototype";
+import { PitchRow, melodyRows, useSequencerNotes } from "../prototype/notes.prototype";
 import { PrototypeFrequency, PrototypeTitle, useDocNodes, useModulatedReadout, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
@@ -22,6 +23,8 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const modulatedReadout = useModulatedReadout();
   const nodes = useDocNodes();
   const wide = useSequencerWide(node);
+  const seqNotes = useSequencerNotes(node);
+  const melody = node.kind === "melody" ? melodyRows({ node, advanceFrom: sources.advance, openPanel: () => openPattern(node.id) }) : null;
   const errors = issues.filter((issue) => issue.severity === "error");
   const warning = issues.find((issue) => issue.severity === "warning");
   const portIssue = (port: string) => errors.find((issue) => issue.port === port)?.message;
@@ -96,11 +99,21 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     const body = SequencerBody({
       node, descriptor, clockFrom: sources.clock, rowTop: rowPortTop,
       clockHandle: (top) => inputHandle(clock, top),
+      notes: seqNotes,
+      pitchHandle: (top) => (
+        <Handle key="pitch" id="pitch" type="source" position={Position.Right} className="port control connected"
+          style={{ top }} title="Pitch output: the note of the current step" />
+      ),
       setParam: (name, value, continuous) => actions.setParam(node.id, name, value, continuous),
       beginContinuous: actions.beginContinuous,
     });
     rows.push(...body.rows);
     handles.push(...body.handles);
+  }
+
+  if (melody) {
+    rows.push(...melody);
+    handles.push(inputHandle(ports.find((port) => port.name === "advance")!, rowPortTop(0)));
   }
 
   if (node.kind !== "envelope" && node.kind !== "sequencer") descriptor.params.forEach((param) => {
@@ -109,7 +122,12 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     const isCutoff = param.name === "cutoff_hz";
     const isOscillatorFrequency = param.name === "frequency_hz";
     const modulated = isCutoff && control && sources[control.name];
-    if (modulated) {
+    // PROTOTYPE: an oscillator's Pitch input sits on its Frequency row and overrides it while connected.
+    const pitchPort = isOscillatorFrequency ? ports.find((port) => port.name === "pitch") : undefined;
+    if (pitchPort) handles.push(inputHandle(pitchPort, rowPortTop(index)));
+    if (pitchPort && sources.pitch) {
+      rows.push(<PitchRow key={param.name} from={sources.pitch} />);
+    } else if (modulated) {
       const { base_hz, depth_hz } = session.cutoff_modulation;
       const low = pitchFromHz(base_hz - depth_hz);
       const high = pitchFromHz(base_hz + depth_hz);
@@ -156,7 +174,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       </div>
       <div className="sf-node-io">
         <span>{audioIn ? "in" : ""}</span>
-        <span>{descriptor.has_output ? "out" : node.kind === "output" ? "mono → device" : ""}</span>
+        <span>{node.kind === "melody" ? "pitch" : seqNotes ? "gate" : descriptor.has_output ? "out" : node.kind === "output" ? "mono → device" : ""}</span>
       </div>
       {rows}
       {descriptor.variadic_input && (

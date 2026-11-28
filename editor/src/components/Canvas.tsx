@@ -115,7 +115,8 @@ export function Canvas(props: Props) {
           id,
           type: "wire",
           source: wire.from,
-          sourceHandle: "out",
+          // PROTOTYPE: wires carry no output port; a sequencer feeding a pitch input uses its pitch output.
+          sourceHandle: wire.to.port === "pitch" && doc.nodes.find((node) => node.id === wire.from)?.kind === "sequencer" ? "pitch" : "out",
           target: wire.to.node,
           targetHandle: wire.to.port,
           selected: selectedWires.has(id),

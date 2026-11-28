@@ -16,6 +16,7 @@ import type { NodeDescriptor } from "../api/types";
 import type { DocNode, EditorDocument } from "../model/document";
 import { ParameterRange } from "../components/ParamControl";
 import { useDocNodes, useNodeLabel, useVariant } from "./design-33-41.prototype";
+import { NotesRow, PianoRoll, useNotesToggle, useSequencerNotes } from "./notes.prototype";
 
 export const STEPS = 16;
 const BEAT_LABELS = ["1", "e", "+", "a"];
@@ -57,6 +58,7 @@ interface BodyProps {
   descriptor: NodeDescriptor;
   clockFrom: string | undefined;
   clockHandle: (top: number) => React.ReactNode;
+  pitchHandle: (top: number) => React.ReactNode;
   rowTop: (index: number) => number;
   setParam: (name: string, value: number | number[], continuous: boolean) => void;
   beginContinuous: () => void;
@@ -67,10 +69,11 @@ export function useSequencerWide(node: DocNode): boolean {
 }
 
 /** The clock row comes first so its port sits at a fixed height. */
-export function SequencerBody(props: BodyProps): { rows: React.ReactNode[]; handles: React.ReactNode[] } {
+export function SequencerBody(props: BodyProps & { notes: boolean }): { rows: React.ReactNode[]; handles: React.ReactNode[] } {
+  // Rows: Clock (0), Pattern (1), Notes (2) — the pitch output sits on the Notes row.
   return {
     rows: [<ClockRow key="clock" {...props} />, <SequencerControls key="controls" {...props} />],
-    handles: [props.clockHandle(props.rowTop(0))],
+    handles: [props.clockHandle(props.rowTop(0)), ...(props.notes ? [props.pitchHandle(props.rowTop(2))] : [])],
   };
 }
 
@@ -202,6 +205,8 @@ function InlineGrid(props: BodyProps) {
 function CompactPattern(props: BodyProps) {
   const pattern = steps(props.node);
   const openPanel = usePatternPanel();
+  const notesVariant = useVariant("mel");
+  const notesDesign = new URLSearchParams(window.location.search).get("scenario") === "mel" && notesVariant !== "C";
   return (
     <>
       <div className="param proto-mini-row">
@@ -215,6 +220,7 @@ function CompactPattern(props: BodyProps) {
           {pattern.map((on, index) => <span key={index} className={`${on ? "on" : ""}${index % 4 === 0 ? " downbeat" : ""}`} />)}
         </div>
       </div>
+      {notesDesign && <NotesRow node={props.node} setParam={props.setParam} />}
       <GateLength {...props} />
     </>
   );
@@ -224,16 +230,24 @@ function CompactPattern(props: BodyProps) {
 let openListener: ((id: string) => void) | null = null;
 export function onOpenPattern(listener: (id: string) => void) { openListener = listener; }
 function usePatternPanel() {
-  return (id: string) => openListener?.(id);
+  return openPattern;
 }
+export function openPattern(id: string) { openListener?.(id); }
 
 /** The large editor shown in the panel for variant B. */
-export function PatternEditor({ node, onSteps }: { node: DocNode; onSteps: (next: number[]) => void }) {
+export function PatternEditor({ node, onSteps, onParam }: {
+  node: DocNode;
+  onSteps: (next: number[]) => void;
+  onParam: (name: string, value: number | number[]) => void;
+}) {
   const pattern = steps(node);
   const handlers = usePaint(pattern, onSteps);
   const gate = Number(node.params.gate ?? 0.5);
+  const notesOn = useSequencerNotes(node);
+  const toggle = useNotesToggle();
+  const notes = Array.isArray(node.params.notes) ? (node.params.notes as number[]) : pattern.map(() => 48);
   return (
-    <div className="proto-pattern">
+    <div className={`proto-pattern${notesOn ? " with-notes" : ""}`}>
       <div className="proto-pattern-grid" role="group" aria-label="Steps">
         {pattern.map((on, index) => (
           <button key={index} type="button" className={`proto-cell${on ? " on" : ""}${index % 4 === 0 ? " downbeat" : ""}`}
@@ -243,11 +257,24 @@ export function PatternEditor({ node, onSteps }: { node: DocNode; onSteps: (next
           </button>
         ))}
       </div>
+      {notesOn && (
+        <PianoRoll notes={notes} mask={pattern} onSet={(column, note) => {
+          const next = [...notes];
+          next[column] = note;
+          onParam("notes", next);
+          if (!pattern[column]) onSteps(pattern.map((on, index) => (index === column ? 1 : on)));
+        }} />
+      )}
       <div className="proto-pattern-tools">
         <button type="button" onClick={() => onSteps(pattern.map(() => 0))}>Clear</button>
         <button type="button" onClick={() => onSteps([...pattern.slice(-1), ...pattern.slice(0, -1)])}>Shift →</button>
         <button type="button" onClick={() => onSteps([...pattern.slice(1), pattern[0]])}>← Shift</button>
         <button type="button" onClick={() => onSteps(pattern.map((on) => (on ? 0 : 1)))}>Invert</button>
+        {toggle && (
+          <label className="proto-inline-toggle">
+            <input type="checkbox" checked={notesOn} onChange={() => onParam("notes_on", notesOn ? 0 : 1)} /> Notes + pitch output
+          </label>
+        )}
         <span className="hint">Click or drag to paint · Space toggles the focused step</span>
       </div>
     </div>

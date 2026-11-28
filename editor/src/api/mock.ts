@@ -162,6 +162,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in", "gate"];
     case "sequencer":
       return [];
+    case "melody":
+      return ["advance"];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -190,6 +192,8 @@ function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
     if (cutoff) pending.push(cutoff);
     const clock = feeds.get(`${id}:clock`);
     if (clock) pending.push(clock);
+    const pitch = feeds.get(`${id}:pitch`);
+    if (pitch) pending.push(pitch);
   }
   return issues;
 }
@@ -219,6 +223,8 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
     if (cutoff) pending.push(cutoff);
     const clock = feeds.get(`${id}:clock`);
     if (clock) pending.push(clock);
+    const pitch = feeds.get(`${id}:pitch`);
+    if (pitch) pending.push(pitch);
   }
   for (const node of graph.nodes) {
     if (!reachable.has(node.id)) {
@@ -239,6 +245,12 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
   const cache = new Map<string, Float32Array>();
+  const pitchOf = (id: string): Float32Array => {
+    const node = byId.get(id)!;
+    const clockFrom = feeds.get(`${id}:clock`);
+    const seq = sequence(clockFrom ? render(graph, clockFrom, 0, start + frames) : null, node.params, start, start + frames);
+    return Float32Array.from({ length: frames }, (_, n) => seq.pitch(n));
+  };
   const seeds = noiseSeeds(byId);
   const signal = (id: string): Float32Array => {
     const cached = cache.get(id);
@@ -247,8 +259,12 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     const out = new Float32Array(frames);
     const input = (port: string) => {
       const from = feeds.get(`${id}:${port}`);
+      // PROTOTYPE: wires carry no output port, so a sequencer feeding a `pitch` input supplies its pitch.
+      if (from && port === "pitch" && byId.get(from)?.kind === "sequencer") return pitchOf(from);
       return from ? signal(from) : new Float32Array(frames);
     };
+    const pitched = feeds.has(`${id}:pitch`) ? input("pitch") : null;
+    let phaseAcc = 0;
     const p = (name: string) => Number(node?.params[name] ?? 0);
     const noiseKey = mix32(seeds.get(id) ?? 0);
     let filtered = 0;
@@ -256,13 +272,19 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     const envelopeLevel = node?.kind === "envelope" && feeds.has(`${id}:gate`)
       ? adsr(render(graph, feeds.get(`${id}:gate`)!, 0, start + frames), node.params, start)
       : () => 0;
+    const melodyPitch = node?.kind === "melody"
+      ? melody(feeds.has(`${id}:advance`) ? render(graph, feeds.get(`${id}:advance`)!, 0, start + frames) : null, node.params, start, start + frames)
+      : () => 0;
     // PROTOTYPE: the sequencer's step position also depends on the clock's history.
     const sequencerGate = node?.kind === "sequencer"
       ? sequence(feeds.has(`${id}:clock`) ? render(graph, feeds.get(`${id}:clock`)!, 0, start + frames) : null, node.params, start, start + frames)
-      : () => 0;
+      : { gate: () => 0, pitch: () => 0 };
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
-      const phase = (p("frequency_hz") * t) % 1;
+      // PROTOTYPE: a pitch input overrides Frequency: v → MIDI 60 + 60·v.
+      const phase = pitched
+        ? (phaseAcc = (phaseAcc + 440 * 2 ** ((60 + 60 * pitched[n] - 69) / 12) / INFO.sample_rate_hz) % 1)
+        : (p("frequency_hz") * t) % 1;
       switch (node.kind) {
         case "sine":
           out[n] = Math.sin(2 * Math.PI * phase);
@@ -301,7 +323,10 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           out[n] = input("in")[n] * envelopeLevel(n);
           break;
         case "sequencer":
-          out[n] = sequencerGate(n);
+          out[n] = sequencerGate.gate(n);
+          break;
+        case "melody":
+          out[n] = melodyPitch(n);
           break;
       }
     }
@@ -351,9 +376,17 @@ function adsr(gate: number[], params: Record<string, unknown>, start: number) {
 function sequence(clock: number[] | null, params: Record<string, unknown>, start: number, end: number) {
   const rate = INFO.sample_rate_hz;
   const steps = (params.steps as number[] | undefined) ?? [];
+  const notes = (params.notes as number[] | undefined) ?? [];
   const length = Math.max(1, steps.length);
   const gate = Number(params.gate ?? 0.5);
   const levels = new Float32Array(end);
+  const pitch = new Float32Array(end);
+  // Pitch holds the last active step's note, so release tails keep their pitch.
+  let held = (notes.find((_, index) => steps[index]) ?? 60);
+  const note = (step: number) => {
+    if (step >= 0 && steps[step] && notes[step] !== undefined) held = notes[step];
+    return (held - 60) / 60;
+  };
   if (clock) {
     // Gate length is a share of the last measured clock period.
     let step = -1, high = false, lastEdge = -1, period = rate / 8;
@@ -366,6 +399,7 @@ function sequence(clock: number[] | null, params: Record<string, unknown>, start
       }
       high = nowHigh;
       levels[n] = step >= 0 && steps[step] && n - lastEdge < gate * period ? 1 : 0;
+      pitch[n] = note(step);
     }
   } else {
     const stepFrames = (60 / Number(params.tempo_bpm ?? 120) / 4) * rate;
@@ -373,9 +407,24 @@ function sequence(clock: number[] | null, params: Record<string, unknown>, start
       const position = n / stepFrames;
       const step = Math.floor(position) % length;
       levels[n] = steps[step] && position % 1 < gate ? 1 : 0;
+      pitch[n] = note(step);
     }
   }
-  return (n: number) => levels[start + n];
+  return { gate: (n: number) => levels[start + n], pitch: (n: number) => pitch[start + n] };
+}
+
+/** PROTOTYPE: a note list that moves to the next note on each rising edge of `advance`. */
+function melody(advance: number[] | null, params: Record<string, unknown>, start: number, end: number) {
+  const notes = (params.notes as number[] | undefined) ?? [60];
+  const pitch = new Float32Array(end);
+  let index = -1, high = false;
+  for (let n = 0; n < end; n++) {
+    const nowHigh = (advance?.[n] ?? 0) > 0;
+    if (nowHigh && !high) index = (index + 1) % notes.length;
+    high = nowHigh;
+    pitch[n] = (notes[Math.max(0, index)] - 60) / 60;
+  }
+  return (n: number) => pitch[start + n];
 }
 
 function noiseSeeds(nodes: ReadonlyMap<string, NodeSpec>): Map<string, number> {
@@ -419,10 +468,11 @@ function clamp(value: number) {
 function prototypeCatalog(catalog: NodeDescriptor[]): NodeDescriptor[] {
   const time = (name: string, label: string, value: number) =>
     ({ name, label, unit: "s", min: 0.001, max: 10, default: value, scale: "log" as const });
+  const pitchIn = { name: "pitch", label: "Pitch", signal: "control" as const, required: false };
   const withWet = catalog.map((node) => node.kind !== "low_pass" ? node : {
     ...node,
     params: [...node.params, { name: "wet", label: "Dry/Wet", unit: "%", min: 0, max: 1, default: 1, scale: "linear" as const }],
-  });
+  }).map((node) => ["sine", "square", "sawtooth"].includes(node.kind) ? { ...node, inputs: [...node.inputs, pitchIn] } : node);
   return [...withWet.filter((node) => node.kind !== "output"), {
     kind: "envelope",
     label: "Envelope",
@@ -452,5 +502,14 @@ function prototypeCatalog(catalog: NodeDescriptor[]): NodeDescriptor[] {
       { name: "tempo_bpm", label: "Tempo", unit: "BPM", min: 20, max: 300, default: 120, scale: "linear" },
       { name: "gate", label: "Gate length", unit: "%", min: 0.05, max: 1, default: 0.5, scale: "linear" },
     ],
+  }, {
+    kind: "melody",
+    label: "Melody",
+    category: "source",
+    signature: "melody(notes, advance)",
+    inputs: [{ name: "advance", label: "Advance", signal: "control", required: true }],
+    variadic_input: null,
+    has_output: true,
+    params: [],
   }, ...withWet.filter((node) => node.kind === "output")];
 }

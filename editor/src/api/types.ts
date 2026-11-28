@@ -12,7 +12,8 @@ export type NodeKind =
   | "output"
   // PROTOTYPE #34
   | "envelope"
-  | "sequencer";
+  | "sequencer"
+  | "melody";
 
 export type ParamValue = number | number[];
 

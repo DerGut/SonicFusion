@@ -12,6 +12,7 @@ import { PanelRename, useDocNodes, useNodeLabel, useVariant } from "../prototype
 // PROTOTYPE #34/#39
 import { SlowScope, formatSeconds, gateSource, probeFrames } from "../prototype/envelope.prototype";
 import { PatternEditor } from "../prototype/sequencer.prototype";
+import { PianoRoll } from "../prototype/notes.prototype";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
@@ -34,15 +35,15 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
   onClose: () => void;
   onRename: (id: string, name: string) => void;
   renameFocus?: number;
-  onSetParam?: (name: string, value: number[]) => void;
+  onSetParam?: (name: string, value: number | number[]) => void;
 }) {
   const seqVariant = useVariant("seq");
-  const patternTab = seqVariant === "B" && node.kind === "sequencer";
+  const patternTab = (seqVariant === "B" && node.kind === "sequencer") || node.kind === "melody";
   const label = useNodeLabel();
   const docNodes = useDocNodes();
   const nameVariant = useVariant("name");
   const [view, setView] = useState<"scope" | "spectrum" | "pattern">(
-    new URLSearchParams(window.location.search).get("seq") === "B" && node.kind === "sequencer" ? "pattern" : "scope");
+    (new URLSearchParams(window.location.search).get("seq") === "B" && node.kind === "sequencer") || node.kind === "melody" ? "pattern" : "scope");
   const [probe, setProbe] = useState<ProbeWindow | null>(null);
   const [gateProbe, setGateProbe] = useState<number[]>([]);
   const frames = probeFrames(graph, node, session.sample_rate_hz, PROBE_FRAMES);
@@ -101,7 +102,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
           {([...(patternTab ? ["pattern"] as const : []), "scope", "spectrum"] as const).map((tab) => (
             <button key={tab} type="button" role="tab" aria-selected={view === tab} aria-controls="probe-plot"
               className={view === tab ? "active" : ""} onClick={() => setView(tab)}>
-              {tab === "scope" ? "Scope" : tab === "spectrum" ? "Spectrum" : "Pattern"}
+              {tab === "scope" ? "Scope" : tab === "spectrum" ? "Spectrum" : node.kind === "melody" ? "Notes" : "Pattern"}
             </button>
           ))}
         </div>
@@ -121,14 +122,18 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
           {unavailable ? (
             <p className={`plot-message${unavailable.problem ? " error" : ""}`}>{unavailable.text}</p>
           ) : view === "pattern" && patternTab ? (
-            <PatternEditor node={node} onSteps={(next) => onSetParam?.("steps", next)} />
+            node.kind === "melody" ? (
+              <MelodyEditor notes={Array.isArray(node.params.notes) ? node.params.notes as number[] : [48]} onNotes={(next) => onSetParam?.("notes", next)} />
+            ) : (
+              <PatternEditor node={node} onSteps={(next) => onSetParam?.("steps", next)} onParam={(name, value) => onSetParam?.(name, value)} />
+            )
           ) : view === "scope" || view === "pattern" ? (
             slow ? <SlowScope samples={samples} gate={gateProbe} rate={rate} outline={node.kind === "envelope"} /> : <Scope samples={samples} rate={rate} />
           ) : (
             <Spectrum spectrum={spectrum} rate={rate} cutoff={cutoff} />
           )}
           <span className="plot-label">
-            {view === "pattern" && patternTab ? "one bar · 16 steps · four per beat" : view !== "spectrum"
+            {view === "pattern" && patternTab ? node.kind === "melody" ? "one note per rising edge of Advance · loops" : "one bar · 16 steps · four per beat" : view !== "spectrum"
               ? slow ? node.kind === "sequencer" ? `${formatSeconds(frames / rate)} · one bar` : node.kind === "envelope" ? `${formatSeconds(frames / rate)} · gate dashed · peak per 10 ms` : `${formatSeconds(frames / rate)} · two cycles` : `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
               : "dBFS · 20 Hz – 20 kHz · log"}
           </span>
@@ -218,4 +223,19 @@ function lowPassMarker(graph: GraphSpec, node: DocNode, session: SessionInfo) {
   }
   const hz = Number(node.params.cutoff_hz);
   return { hz, band: null, label: formatHz(hz) };
+}
+
+/** PROTOTYPE: a Melody node's note list, one column per hit. */
+function MelodyEditor({ notes, onNotes }: { notes: number[]; onNotes: (next: number[]) => void }) {
+  return (
+    <div className="proto-pattern with-notes">
+      <PianoRoll notes={notes} labels={(column) => `Hit ${column + 1}`}
+        onSet={(column, note) => onNotes(notes.map((current, index) => (index === column ? note : current)))} />
+      <div className="proto-pattern-tools">
+        <button type="button" disabled={notes.length >= 16} onClick={() => onNotes([...notes, notes[notes.length - 1]])}>+ Note</button>
+        <button type="button" disabled={notes.length <= 1} onClick={() => onNotes(notes.slice(0, -1))}>− Note</button>
+        <span className="hint">{notes.length} notes · loops independently of the rhythm's length</span>
+      </div>
+    </div>
+  );
 }

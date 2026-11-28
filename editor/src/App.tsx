@@ -14,6 +14,7 @@ import { TopBar } from "./components/TopBar";
 // PROTOTYPE #33/#41
 import { gateScenario } from "./prototype/envelope.prototype";
 import { onOpenPattern, sequencerScenario } from "./prototype/sequencer.prototype";
+import { notesScenario } from "./prototype/notes.prototype";
 import { DocNodesProvider, PatchUnitToggle, PrototypeSwitcher, RenameFocusProvider, edgeScenario, useNodeLabel } from "./prototype/design-33-41.prototype";
 import {
   type Catalog,
@@ -96,7 +97,9 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
   // Sample rate and limits follow the output device each time playback starts.
   const [session, setSession] = useState(initialSession);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
-    doc: new URLSearchParams(window.location.search).get("scenario")?.startsWith("seq")
+    doc: new URLSearchParams(window.location.search).get("scenario") === "mel"
+      ? notesScenario(studioDocument(studioPatch as GraphSpec), new URLSearchParams(window.location.search).get("mel") ?? "A")
+      : new URLSearchParams(window.location.search).get("scenario")?.startsWith("seq")
       ? sequencerScenario(studioDocument(studioPatch as GraphSpec), new URLSearchParams(window.location.search).get("scenario") === "seq-clocked", new URLSearchParams(window.location.search).get("seq") ?? "A")
       : new URLSearchParams(window.location.search).get("scenario") === "gate" ? gateScenario(studioDocument(studioPatch as GraphSpec))
       : new URLSearchParams(window.location.search).has("scenario") ? edgeScenario(studioDocument(studioPatch as GraphSpec)) : loadDocument() ?? studioDocument(studioPatch as GraphSpec),
@@ -176,7 +179,12 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
     () => ({
       renameNode: (id, name) => edit((current) => renameNode(current, id, name)),
       setParam: (id: string, name: string, value: ParamValue, continuous: boolean) =>
-        edit((current) => setParam(current, id, name, value), !continuous),
+        edit((current) => {
+          const next = setParam(current, id, name, value);
+          // PROTOTYPE notes B: turning Notes off removes the pitch output, so its wires go too (one undo step).
+          if (name !== "notes_on" || value !== 0) return next;
+          return { ...next, wires: next.wires.filter((wire) => !(wire.from === id && wire.to.port === "pitch")) };
+        }, !continuous),
       beginContinuous: () => dispatch({ type: "checkpoint" }),
       addMixInput: (id: string) =>
         edit((current) => addMixInput(current, id, catalog.get("mix")?.variadic_input?.weight.default ?? 0.5)),
