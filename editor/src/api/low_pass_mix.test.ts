@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 
 import studioPatch from "../../../crates/sonicfusion-graph-api/fixtures/studio-patch.json";
+import { formatValue } from "../components/ParamControl";
 import { parseDocument, setParam, studioDocument, toGraph } from "../model/document";
 import { MockEngine } from "./mock";
 import type { GraphSpec } from "./types";
@@ -45,4 +46,11 @@ it("migrates the old Low-pass mix key without changing the Mix node", async () =
   const dry = (await engine.probe(toGraph(document), "mix", 512)).samples;
   expect((await engine.probe(restored, "lpf", 512)).samples).toEqual(dry);
   expect((await engine.probe(toGraph(old), "lpf", 512)).samples).toEqual(dry);
+});
+
+it("distinguishes near-endpoint wet ratios from bypass and full wet", async () => {
+  const catalog = await new MockEngine().catalog();
+  const wet = catalog.find((node) => node.kind === "low_pass")!.params.find((param) => param.name === "wet")!;
+  expect([0, 0.0001, 0.7, 0.9999, 1].map((ratio) => formatValue(wet, ratio)))
+    .toEqual(["0% wet", "<0.1% wet", "70% wet", ">99.9% wet", "100% wet"]);
 });

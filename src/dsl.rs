@@ -285,7 +285,7 @@ fn lpf_args(
         error(
             source,
             at,
-            "lpf expects one input, a numeric or $reference cutoff, and an optional numeric mix",
+            "lpf expects one input, a numeric or $reference cutoff, and an optional numeric wet ratio",
         )
     };
     let (input, args) = match (incoming, args) {
@@ -799,10 +799,10 @@ mod tests {
                 "sine(440) -> lpf(100000) -> out",
                 "cutoff_hz must be below Nyquist",
             ),
-            ("sine(440) -> lpf(1000, 1.01) -> out", "low-pass mix"),
+            ("sine(440) -> lpf(1000, 1.01) -> out", "low-pass wet ratio"),
             (
                 "sine(2) -> $cutoff; sine(440) -> lpf($cutoff, -0.1) -> out",
-                "low-pass mix",
+                "low-pass wet ratio",
             ),
             ("sine(440) -> out -> gain(0.5)", "out must end a statement"),
             (

@@ -121,7 +121,8 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
           </div>
           {dryFloor && (
             <div title="Asymptotic floor set by the dry signal well above the cutoff">
-              <dt>Above cutoff</dt><dd>{dryFloor} floor</dd>
+              <dt>Above cutoff</dt>
+              <dd>{dryFloor} floor<br /><small>relative to input</small></dd>
             </div>
           )}
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}

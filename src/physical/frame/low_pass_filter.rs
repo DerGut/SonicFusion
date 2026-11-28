@@ -74,7 +74,7 @@ pub fn low_pass_with_mix(
 pub(crate) fn validate_mix(mix: f64) -> Result<()> {
     if !(0.0..=1.0).contains(&mix) {
         return Err(DataFusionError::Plan(
-            "low-pass mix must be between 0 and 1".into(),
+            "low-pass wet ratio must be between 0 and 1".into(),
         ));
     }
     Ok(())

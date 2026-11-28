@@ -23,8 +23,11 @@ export function fromSlider(descriptor: ParamDescriptor, position: number): numbe
 export function formatValue(descriptor: ParamDescriptor, value: number): string {
   if (descriptor.unit === "Hz") return formatHz(value);
   if (descriptor.unit === "%") {
-    const suffix = descriptor.name === "wet" ? "% wet" : "%";
-    return Number((value * 100).toFixed(1)) + suffix;
+    const percentage = Number((value * 100).toFixed(1));
+    if (descriptor.name !== "wet") return `${percentage}%`;
+    if (value > 0 && value < 0.001) return "<0.1% wet";
+    if (value > 0.999 && value < 1) return ">99.9% wet";
+    return `${percentage}% wet`;
   }
   return value.toFixed(2);
 }
