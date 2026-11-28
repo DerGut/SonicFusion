@@ -1,6 +1,7 @@
 export const PITCH_FLOOR_HZ = 20;
 export const DETUNE_STEP = 0.1;
-export type FrequencyMode = "hz" | "note" | "bpm";
+export const FREQUENCY_MODES = [["hz", "Hz"], ["note", "Note"], ["bpm", "BPM"]] as const;
+export type FrequencyMode = typeof FREQUENCY_MODES[number][0];
 
 const SECONDS_PER_MINUTE = 60;
 

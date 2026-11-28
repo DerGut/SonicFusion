@@ -50,7 +50,6 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, f
     : value > 0 && value < 0.01 ? compactHz(value) : formatHz(value);
   const secondary = noteLed || bpmLed ? compactHz(value)
     : pitch && (Math.abs(pitch.cents) < 0.5 ? "" : "≈") + noteName(pitch.midi);
-  const selectMode = (next: FrequencyMode) => onOverride(next === defaultMode ? undefined : next);
   // The controls use the catalog's editing range and the device's strict Nyquist limit.
   const max = Math.min(descriptor.max, sampleRate / 2 * (1 - Number.EPSILON));
   const range = { ...descriptor, max };
@@ -74,7 +73,7 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, f
           {secondary ? (
             <button type="button" className={`frequency-swap nodrag${override ? " overridden" : ""}`}
               aria-label={"Lead with " + nextUnit} title={"Lead with " + nextUnit + (override ? " (display override)" : "")}
-              onClick={() => selectMode(nextMode)}>
+              onClick={() => onOverride(!bpmLed && nextMode === defaultMode ? undefined : nextMode)}>
               {secondary}
             </button>
           ) : value >= 0 && value < PITCH_FLOOR_HZ ? <span className="frequency-secondary">rate</span> : null}
@@ -88,7 +87,7 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, f
         } : undefined} />
       {open && <FrequencyPopover id={id + "-editor"} anchor={anchor} label={descriptor.label}
         value={value} pitch={pitch} min={descriptor.min} max={max} mode={mode}
-        onModeChange={supportsBpm ? selectMode : undefined}
+        preferredMode={override} onModeChange={supportsBpm ? onOverride : undefined}
         onClose={close} onBeginContinuous={onBeginContinuous}
         onFrequency={(hz) => {
           setReference(undefined);

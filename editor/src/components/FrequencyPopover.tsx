@@ -1,15 +1,15 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { DETUNE_STEP, detuneBounds, formatCents, hzToBpm, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type FrequencyMode, type Pitch } from "../model/pitch";
+import { DETUNE_STEP, detuneBounds, FREQUENCY_MODES, formatCents, hzToBpm, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type FrequencyMode, type Pitch } from "../model/pitch";
 import { ParameterRange } from "./ParameterRange";
 
 const WHITE_KEYS_PER_OCTAVE = 7;
 const BLACK_KEY_BOUNDARY: Record<number, number> = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 };
-const FREQUENCY_MODES = [["hz", "Hz"], ["note", "Note"], ["bpm", "BPM"]] as const;
+const MODE_OPTIONS = [[undefined, "Auto"], ...FREQUENCY_MODES] as const;
 const octaveOf = (midi: number) => Math.floor(midi / 12) - 1;
 
-export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mode, onModeChange, onClose,
+export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mode, preferredMode, onModeChange, onClose,
   onBeginContinuous, onFrequency, onPitch }: {
   id: string;
   anchor: RefObject<HTMLButtonElement | null>;
@@ -19,7 +19,8 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
   min: number;
   max: number;
   mode: FrequencyMode;
-  onModeChange?: (mode: FrequencyMode) => void;
+  preferredMode?: FrequencyMode;
+  onModeChange?: (mode?: FrequencyMode) => void;
   onClose: () => void;
   onBeginContinuous: () => void;
   onFrequency: (hz: number) => void;
@@ -30,6 +31,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
   const [text, setText] = useState<string | null>(null);
   const pendingText = useRef<string | null>(null);
   const bpm = mode === "bpm";
+  const noteFallback = preferredMode === "note" && !pitch;
   const exactValue = String(bpm ? hzToBpm(value) : value);
   const [browsedOctave, setBrowsedOctave] = useState<number | null>(null);
   const floorHz = Math.max(min, PITCH_FLOOR_HZ);
@@ -167,16 +169,22 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
         </>
       )}
       {onModeChange && (
-        <div className="frequency-unit" role="radiogroup" aria-label="Frequency unit">
-          <span aria-hidden="true">Frequency unit</span>
-          {FREQUENCY_MODES.map(([unit, name]) => (
-            <label key={unit}>
-              <input type="radio" name={id + "-unit"} checked={mode === unit} disabled={unit === "note" && !pitch}
-                onChange={() => onModeChange(unit)} />
-              {name}
-            </label>
-          ))}
-        </div>
+        <>
+          <div className="frequency-unit" role="radiogroup" aria-label="Frequency unit"
+            aria-describedby={noteFallback ? id + "-note-fallback" : undefined}>
+            <span aria-hidden="true">Frequency unit</span>
+            {MODE_OPTIONS.map(([unit, name]) => (
+              <label key={name}>
+                <input type="radio" name={id + "-unit"} checked={preferredMode === unit}
+                  disabled={unit === "note" && !pitch && !noteFallback} onChange={() => onModeChange(unit)} />
+                {name}
+              </label>
+            ))}
+          </div>
+          {noteFallback && <p className="param-note" id={id + "-note-fallback"}>
+            Note mode shows Hz below {PITCH_FLOOR_HZ} Hz.
+          </p>}
+        </>
       )}
       <form className="frequency-exact" onSubmit={(event) => {
         event.preventDefault();

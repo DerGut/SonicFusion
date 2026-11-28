@@ -7,7 +7,7 @@ import type {
   PortRef,
   Wire,
 } from "../api/types";
-import type { FrequencyMode } from "./pitch";
+import { FREQUENCY_MODES, type FrequencyMode } from "./pitch";
 
 export interface Position {
   x: number;
@@ -284,7 +284,7 @@ export function parseDocument(text: string): EditorDocument {
       typeof position?.y !== "number" ||
       !Number.isFinite(position.x) ||
       !Number.isFinite(position.y) ||
-      (candidate.frequencyMode !== undefined && candidate.frequencyMode !== "hz" && candidate.frequencyMode !== "note" && candidate.frequencyMode !== "bpm")
+      (candidate.frequencyMode !== undefined && !FREQUENCY_MODES.some(([mode]) => mode === candidate.frequencyMode))
     ) {
       throw new Error("project has a malformed node");
     }
