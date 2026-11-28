@@ -43,6 +43,7 @@ export function pickUpWire(event: React.PointerEvent | React.MouseEvent, wireId:
 }
 
 export interface NodeActions {
+  renameNode(id: string, name: string): void;
   setParam(id: string, name: string, value: ParamValue, continuous: boolean): void;
   beginContinuous(): void;
   addMixInput(id: string): void;
@@ -55,7 +56,7 @@ export interface SfNodeData extends Record<string, unknown> {
   descriptor: NodeDescriptor;
   ports: PortDescriptor[];
   /** Connected input port name → the node feeding it. */
-  sources: Record<string, string>;
+  sources: Record<string, { id: string; label: string }>;
   /** Ids of the wires leaving this node, oldest first. */
   outgoing: string[];
   issues: GraphIssue[];

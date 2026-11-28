@@ -151,8 +151,22 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px;
   border-bottom: 1px solid #262c35; color: var(--muted);
 }
-.sf-node-title { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sf-node-kind { font-family: var(--mono); font-size: 11px; }
+.node-title-button {
+  min-width: 0; padding: 0; border: 0; background: transparent; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sf-node-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.sf-node-title.node-title-button { cursor: inherit; }
+.sf-node-id { font-family: var(--mono); }
+.sf-node-id-chip {
+  max-width: 48%; padding: 1px 4px; border: 1px solid var(--edge); border-radius: 4px;
+  color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sf-node-title-input, .probe-title-input {
+  height: 22px; padding: 0 4px; border: 1px solid var(--control); border-radius: 4px; background: #0f1216;
+}
+.sf-node-title-input { width: 0; }
+.sf-node-kind { flex: none; font-family: var(--mono); font-size: 11px; }
 .sf-node-io { height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 11px; color: var(--muted); }
 .sf-node-footer { display: flex; gap: 4px; padding: 4px 8px 8px; }
 .sf-node-footer button { height: 24px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; font-size: 11.5px; color: var(--muted); }
@@ -169,7 +183,7 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .param.invalid .value, .param.invalid label { color: var(--error-soft); }
 .value-input { width: 86px; height: 20px; padding: 0 4px; border: 1px solid var(--control); border-radius: 4px; background: #0f1216; font-family: var(--mono); font-size: 11.5px; text-align: right; }
 .param.modulated .param-top, .param.modulated .value { color: var(--control-soft); }
-.param-note { margin: 0; font-size: 11px; color: var(--muted); }
+.param-note { margin: 0; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .range { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 4px; margin: 0; border-radius: 2px; background: var(--track); cursor: ew-resize; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); box-shadow: 0 0 0 1px #4a5361; }
 .range::-moz-range-thumb { width: 8px; height: 8px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); }
@@ -227,7 +241,12 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 /* Probe */
 .probe { height: 230px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 12px; background: var(--bar); border-top: 1px solid var(--line); }
 .probe-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--audio); }
-.probe-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.probe-title {
+  max-width: 100%; max-height: 3.6em; font-size: 12.5px; font-weight: 600; color: var(--text);
+  white-space: normal; overflow-wrap: anywhere; overflow-y: auto;
+}
+.probe-title:hover { text-decoration: underline; }
+.probe-title-input { width: min(24rem, 100%); }
 .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: #0f1216; }
 .tabs button { height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; font-size: 11.5px; color: var(--muted); }
 .tabs button.active { background: #252b34; color: var(--text); }
@@ -253,6 +272,7 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   display: flex; flex-wrap: wrap; align-items: center; gap: 16px; min-height: 32px; padding: 0 16px;
   background: var(--bar); border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted);
 }
+.status-selected { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar .ok { display: flex; align-items: center; gap: 5px; color: #86efac; }
 .issues { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; font-size: 11.5px; max-width: 60%; }
 .issues.error { color: var(--error-soft); }

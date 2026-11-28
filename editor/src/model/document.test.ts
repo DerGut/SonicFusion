@@ -12,9 +12,11 @@ import {
   disconnect,
   inputPorts,
   moveWire,
+  nodeLabel,
   parseDocument,
   removeMixInput,
   removeNodes,
+  renameNode,
   studioDocument,
   toGraph,
   wouldCycle,
@@ -28,6 +30,34 @@ describe("document", () => {
     const doc = studio();
     expect(toGraph(doc)).toEqual(studioPatch);
     expect(parseDocument(JSON.stringify(doc))).toEqual(doc);
+  });
+
+  it("round-trips duplicate display names without changing the graph", () => {
+    const doc = studio();
+    const named = renameNode(renameNode(doc, "lfo", "  LFO  "), "osc_b", "LFO");
+    const reopened = parseDocument(JSON.stringify(named));
+    expect(reopened.nodes.filter((node) => node.displayName === "LFO").map((node) => node.id))
+      .toEqual(["osc_b", "lfo"]);
+    expect(reopened.nodes.filter((node) => node.displayName === "LFO").map(nodeLabel))
+      .toEqual(["LFO (osc_b)", "LFO (lfo)"]);
+    expect(toGraph(reopened)).toEqual(toGraph(doc));
+    expect(renameNode(named, "lfo", "LFO")).toBe(named);
+    expect(renameNode(named, "missing", "LFO")).toBe(named);
+  });
+
+  it("clears a display name without changing the node's default title", () => {
+    const doc = studio();
+    const named = renameNode(doc, "lfo", "Modulator");
+    const cleared = renameNode(named, "lfo", "  ");
+    expect(parseDocument(JSON.stringify(cleared))).toEqual(doc);
+    expect(nodeLabel(cleared.nodes.find((node) => node.id === "lfo")!)).toBe("lfo");
+    expect(renameNode(cleared, "lfo", "")).toBe(cleared);
+  });
+
+  it("rejects a saved project with a malformed display name", () => {
+    const doc = studio();
+    const damaged = { ...doc, nodes: [{ ...doc.nodes[0], displayName: 42 }, ...doc.nodes.slice(1)] };
+    expect(() => parseDocument(JSON.stringify(damaged))).toThrow("malformed node");
   });
 
   it("adds nodes with catalog defaults and unique ids", () => {

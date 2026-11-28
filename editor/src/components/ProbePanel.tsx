@@ -6,6 +6,7 @@ import type { DocNode } from "../model/document";
 import { formatDb, formatHz, spectrumDb, triggerIndex } from "../model/signal";
 import { describe } from "../state/useEngineSession";
 import { Icon } from "./icons";
+import { NodeTitle } from "./NodeTitle";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
@@ -17,7 +18,7 @@ const SCOPE_SECONDS = 0.02;
  * output from the draft at the session's current frame; nothing is tapped
  * from the device stream.
  */
-export function ProbePanel({ client, graph, node, playing, draft, session, onClose }: {
+export function ProbePanel({ client, graph, node, playing, draft, session, onRename, onClose }: {
   client: EngineClient;
   graph: GraphSpec;
   node: DocNode;
@@ -25,6 +26,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
   /** The draft differs from what is playing, so the probe shows unapplied edits. */
   draft: boolean;
   session: SessionInfo;
+  onRename: (id: string, name: string) => void;
   onClose: () => void;
 }) {
   const [view, setView] = useState<"scope" | "spectrum">("scope");
@@ -71,7 +73,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
     <section className="probe" aria-label="Signal probe">
       <div className="probe-head">
         <Icon name="probe" />
-        <span className="probe-title">{node.id} › out</span>
+        <NodeTitle node={node} onRename={onRename} inProbe />
         <div role="tablist" aria-label="Probe view" className="tabs">
           {(["scope", "spectrum"] as const).map((tab) => (
             <button key={tab} type="button" role="tab" aria-selected={view === tab} aria-controls="probe-plot"

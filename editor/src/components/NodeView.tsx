@@ -6,6 +6,7 @@ import { formatHz } from "../model/signal";
 import { wireId } from "../model/document";
 import { IO_PORT_TOP, type SfNode, pickUpWire, rowPortTop } from "./flow";
 import { KindIcon } from "./icons";
+import { NodeTitle } from "./NodeTitle";
 import { OutputMeter } from "./OutputMeter";
 import { ParamControl } from "./ParamControl";
 
@@ -30,7 +31,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   // A connected input picks up its wire instead of starting a new one.
   const inputHandle = (port: PortDescriptor, top: number) => {
     const from = sources[port.name];
-    const wire = from ? wireId({ from, to: { node: node.id, port: port.name } }) : null;
+    const wire = from ? wireId({ from: from.id, to: { node: node.id, port: port.name } }) : null;
     const pickUp = (event: React.PointerEvent | React.MouseEvent) => {
       if (wire && event.button === 0) pickUpWire(event, wire, "target");
     };
@@ -38,7 +39,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       <Handle key={port.name} id={port.name} type="target" position={Position.Left}
         className={`port ${port.signal}${from ? " connected" : ""}${portIssue(port.name) ? " port-error" : ""}`}
         style={{ top }} onPointerDownCapture={pickUp} onMouseDownCapture={pickUp}
-        title={portIssue(port.name) ?? (from ? `${port.label}: drag to move or detach the wire from ${from}` : `${port.label} (${port.signal})`)} />
+        title={portIssue(port.name) ?? (from ? `${port.label}: drag to move or detach the wire from ${from.label}` : `${port.label} (${port.signal})`)} />
     );
   };
   // Option-drag on an output moves its newest wire; a plain drag adds one.
@@ -78,7 +79,9 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
             <span>{param.label}</span>
             <span className="value">{formatHz(base_hz)} ± {Math.round(depth_hz)} Hz</span>
           </div>
-          <p className="param-note">from {sources[control.name]} · fixed engine mapping</p>
+          <p className="param-note" title={`from ${modulated.label} · fixed engine mapping`}>
+            from {modulated.label} · fixed engine mapping
+          </p>
         </div>,
       );
     } else {
@@ -96,7 +99,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     <div className={className}>
       <div className="sf-node-header">
         <KindIcon kind={node.kind} />
-        <span className="sf-node-title">{node.id}</span>
+        <NodeTitle node={node} onRename={actions.renameNode} />
         <span className="sf-node-kind">{descriptor.signature.split("(")[0]}</span>
       </div>
       <div className="sf-node-io">

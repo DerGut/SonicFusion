@@ -22,9 +22,11 @@ import {
   moveNodes,
   moveWire,
   nextNodeId,
+  nodeLabel,
   parseDocument,
   removeMixInput,
   removeNodes,
+  renameNode,
   setParam,
   studioDocument,
   toGraph,
@@ -166,6 +168,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
 
   const actions = useMemo<NodeActions>(
     () => ({
+      renameNode: (id, name) => edit((current) => renameNode(current, id, name)),
       setParam: (id: string, name: string, value: ParamValue, continuous: boolean) =>
         edit((current) => setParam(current, id, name, value), !continuous),
       beginContinuous: () => dispatch({ type: "checkpoint" }),
@@ -287,6 +290,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
               playing={playing}
               draft={engine.dirty}
               session={session}
+              onRename={actions.renameNode}
               onClose={() => setSelected(new Set())}
             />
           )}
@@ -296,7 +300,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
         nodes={doc.nodes.length}
         wires={doc.wires.length}
         issues={shownIssues}
-        selected={selectedNode?.id ?? null}
+        selected={selectedNode ? nodeLabel(selectedNode) : null}
         pending={engine.dirty}
         onFocus={focus}
       />
