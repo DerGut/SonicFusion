@@ -2,54 +2,131 @@ use std::sync::Arc;
 
 use datafusion::{
     arrow::array::{Float32Array, RecordBatch, UInt64Array},
-    error::DataFusionError,
+    error::{DataFusionError, Result},
+    execution::{SendableRecordBatchStream, TaskContext},
     physical_expr::EquivalenceProperties,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
+        DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
+        Partitioning, PlanProperties,
         execution_plan::{Boundedness, EmissionType},
         stream::RecordBatchStreamAdapter,
     },
 };
 
-use crate::{ExecutionConfig, dsp, layout::frame::frame_schema};
+use futures::StreamExt;
 
+use crate::{ExecutionConfig, FrameDecoder, dsp, layout::frame::frame_schema};
+
+use super::FramePlan;
+
+/// Generates a frame stream of sine samples with optional per-frame frequency control.
 #[derive(Debug)]
 pub struct FrameSineOscExec {
-    sample_rate_hz: u32,
+    config: ExecutionConfig,
     frequency_hz: f64,
-    batch_frame_capacity: usize,
-    start_frame: u64,
-
+    modulation: Option<Arc<dyn ExecutionPlan>>,
     properties: Arc<PlanProperties>,
 }
 
 impl FrameSineOscExec {
-    pub fn try_new(
+    pub fn try_new(config: &impl AsRef<ExecutionConfig>, frequency_hz: f64) -> Result<Self> {
+        Self::new(config.as_ref(), frequency_hz, None)
+    }
+
+    /// Drive frequency with a dense normalized control stream. Zero gives the
+    /// base frequency, and the endpoints shift it by an octave in either
+    /// direction. The frequency is capped just below Nyquist.
+    ///
+    /// Phase starts at the base frequency's phase at the execution origin.
+    /// Each control sample advances phase for the next frame.
+    pub fn try_new_modulated(
         config: &impl AsRef<ExecutionConfig>,
         frequency_hz: f64,
-    ) -> datafusion::error::Result<Self> {
-        let config = config.as_ref();
+        modulation: FramePlan,
+    ) -> Result<Self> {
+        let modulation = modulation.into_plan();
+        validate_modulation_partition(modulation.as_ref())?;
+        Self::new(config.as_ref(), frequency_hz, Some(modulation))
+    }
+
+    fn new(
+        config: &ExecutionConfig,
+        frequency_hz: f64,
+        modulation: Option<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Self> {
         super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
         let schema = frame_schema(config);
+        let (emission, boundedness) = if let Some(control) = &modulation {
+            if control.schema() != schema {
+                return Err(DataFusionError::Plan(
+                    "FrameSineOscExec modulation must match the execution frame schema".into(),
+                ));
+            }
+            (control.pipeline_behavior(), control.boundedness())
+        } else {
+            (
+                EmissionType::Incremental,
+                Boundedness::Unbounded {
+                    requires_infinite_memory: false,
+                },
+            )
+        };
         let mut equivalence = EquivalenceProperties::new(schema);
         equivalence.add_ordering(super::frame_ordering());
         let properties = Arc::new(PlanProperties::new(
             equivalence,
             Partitioning::UnknownPartitioning(1),
-            EmissionType::Incremental,
-            Boundedness::Unbounded {
-                requires_infinite_memory: false,
-            },
+            emission,
+            boundedness,
         ));
 
         Ok(Self {
-            sample_rate_hz: config.sample_rate_hz(),
+            config: *config,
             frequency_hz,
-            batch_frame_capacity: config.batch_frame_capacity(),
-            start_frame: config.start_frame(),
+            modulation,
             properties,
         })
     }
+
+    fn execute_modulated(
+        &self,
+        control: &dyn ExecutionPlan,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        let mut decoder = FrameDecoder::continuous(&self.config);
+        let mut phase = dsp::ModulatedPhase::new(
+            self.config.start_frame(),
+            self.frequency_hz,
+            self.config.sample_rate_hz(),
+        );
+        let schema = self.schema();
+        let stream = control.execute(0, context)?.map(move |batch| {
+            let batch = batch?;
+            let controls = decoder
+                .decode_batch(&batch)
+                .map_err(|error| DataFusionError::Execution(format!("sine modulation: {error}")))?;
+            let output = Float32Array::from_iter_values(
+                controls
+                    .iter()
+                    .map(|&sample| (std::f64::consts::TAU * phase.advance(sample)).sin() as f32),
+            );
+            RecordBatch::try_new(
+                batch.schema(),
+                vec![Arc::clone(batch.column(0)), Arc::new(output)],
+            )
+            .map_err(Into::into)
+        });
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+    }
+}
+
+fn validate_modulation_partition(control: &dyn ExecutionPlan) -> Result<()> {
+    if control.output_partitioning().partition_count() != 1 {
+        return Err(DataFusionError::Plan(
+            "FrameSineOscExec requires one modulation partition".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl ExecutionPlan for FrameSineOscExec {
@@ -62,41 +139,61 @@ impl ExecutionPlan for FrameSineOscExec {
     }
 
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-        // FrameSineOscExec is a leaf node that generates new data.
-        // It has no children.
-        vec![]
+        self.modulation.iter().collect()
+    }
+
+    fn required_input_distribution(&self) -> Vec<Distribution> {
+        self.modulation
+            .iter()
+            .map(|_| Distribution::SinglePartition)
+            .collect()
+    }
+
+    fn maintains_input_order(&self) -> Vec<bool> {
+        self.modulation.iter().map(|_| true).collect()
     }
 
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
-        if children.is_empty() {
-            Ok(self)
-        } else {
-            Err(DataFusionError::Internal(
-                "FrameSineOscExec has no children".to_string(),
-            ))
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if self.modulation.is_none() && children.is_empty() {
+            return Ok(self);
         }
+        if let (Some(_), [control]) = (&self.modulation, children.as_slice()) {
+            // The optimizer may introduce a multi-partition input before
+            // enforcing the required single-partition distribution.
+            return Ok(Arc::new(Self::new(
+                &self.config,
+                self.frequency_hz,
+                Some(Arc::clone(control)),
+            )?));
+        }
+        Err(DataFusionError::Internal(
+            "FrameSineOscExec replacement child count does not match the plan".into(),
+        ))
     }
 
     fn execute(
         &self,
         partition: usize,
-        _context: Arc<datafusion::execution::TaskContext>,
-    ) -> datafusion::error::Result<datafusion::execution::SendableRecordBatchStream> {
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
         if partition != 0 {
             return Err(DataFusionError::Execution(format!(
                 "FrameSineOscExec supports only partition 0, got {partition}"
             )));
         }
+        if let Some(control) = &self.modulation {
+            validate_modulation_partition(control.as_ref())?;
+            return self.execute_modulated(control.as_ref(), context);
+        }
 
         let schema = self.schema();
-        let batch_frame_capacity = self.batch_frame_capacity as u64;
-        let sample_rate = self.sample_rate_hz;
-        let frequency = self.frequency_hz;
-
-        let start_frame = self.start_frame;
+        let batch_frame_capacity = self.config.batch_frame_capacity() as u64;
+        let sample_rate_hz = self.config.sample_rate_hz();
+        let frequency_hz = self.frequency_hz;
+        let start_frame = self.config.start_frame();
         let stream = async_stream::try_stream! {
             let mut next_frame = start_frame;
 
@@ -107,19 +204,14 @@ impl ExecutionPlan for FrameSineOscExec {
                         "FrameSineOscExec exhausted the UInt64 frame domain".to_string()
                     ))?;
 
-                let samples = (next_frame..end_frame).map(|frame| {
-                    dsp::sine_at_frame(
-                        frame,
-                        sample_rate,
-                        frequency,
-                    )
-                });
-
                 let frames = Arc::new(UInt64Array::from_iter_values(next_frame..end_frame));
-                let samples = Arc::new(Float32Array::from_iter(samples));
+                let samples = Arc::new(Float32Array::from_iter(
+                    (next_frame..end_frame).map(|frame| {
+                        dsp::sine_at_frame(frame, sample_rate_hz, frequency_hz)
+                    }),
+                ));
 
                 yield RecordBatch::try_new(Arc::clone(&schema), vec![frames, samples])?;
-
                 next_frame = end_frame;
             }
         };
@@ -133,21 +225,32 @@ impl ExecutionPlan for FrameSineOscExec {
 
 impl DisplayAs for FrameSineOscExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.modulation.is_some() {
+            return write!(
+                f,
+                "FrameSineOscExec: base_frequency={}hz, modulation=±1 octave",
+                self.frequency_hz
+            );
+        }
         match t {
             DisplayFormatType::Default => {
                 write!(f, "FrameSineOscExec: frequency={}hz", self.frequency_hz)
             }
-            DisplayFormatType::Verbose => {
-                write!(
-                    f,
-                    "FrameSineOscExec: frequency={}hz, sample_rate={}hz, batch_frame_capacity={}",
-                    self.frequency_hz, self.sample_rate_hz, self.batch_frame_capacity,
-                )
-            }
+            DisplayFormatType::Verbose => write!(
+                f,
+                "FrameSineOscExec: frequency={}hz, sample_rate={}hz, batch_frame_capacity={}",
+                self.frequency_hz,
+                self.config.sample_rate_hz(),
+                self.config.batch_frame_capacity()
+            ),
             DisplayFormatType::TreeRender => {
                 writeln!(f, "frequency={}hz", self.frequency_hz)?;
-                writeln!(f, "sample_rate={}hz", self.sample_rate_hz)?;
-                write!(f, "batch_frame_capacity={}", self.batch_frame_capacity)
+                writeln!(f, "sample_rate={}hz", self.config.sample_rate_hz())?;
+                write!(
+                    f,
+                    "batch_frame_capacity={}",
+                    self.config.batch_frame_capacity()
+                )
             }
         }
     }
@@ -159,20 +262,24 @@ mod tests {
 
     use datafusion::{
         arrow::{
-            array::{Float32Array, UInt64Array},
+            array::{Float32Array, RecordBatch, UInt64Array},
             datatypes::DataType,
         },
         common::assert_contains,
         execution::TaskContext,
         physical_plan::{
-            ExecutionPlan, Partitioning, collect, displayable,
+            Distribution, ExecutionPlan, Partitioning, collect, displayable,
             execution_plan::{Boundedness, EmissionType},
             limit::GlobalLimitExec,
+            test::TestMemoryExec,
         },
     };
     use futures::{StreamExt, TryStreamExt};
 
-    use crate::{RenderConfig, dsp, physical::frame::FrameSineOscExec};
+    use crate::{
+        ExecutionConfig, RenderConfig, dsp, frame_schema,
+        physical::frame::{FramePlan, FrameSineOscExec},
+    };
 
     #[test]
     fn sine_source_validates_its_own_frequency() {
@@ -432,6 +539,155 @@ mod tests {
             schema.metadata().get("audio.layout").map(String::as_str),
             Some("frame")
         );
+    }
+
+    #[tokio::test]
+    async fn malformed_frequency_control_is_rejected() {
+        let config = test_config();
+        let schema = frame_schema(&config);
+        let context = Arc::new(TaskContext::default());
+        for (frames, controls, reason) in [
+            (vec![0, 2], vec![0.0, 0.0], "expected frame 1, got 2"),
+            (vec![0, 0], vec![0.0, 0.0], "expected frame 1, got 0"),
+            (
+                vec![0, 1],
+                vec![0.0, f32::NAN],
+                "non-finite sample at frame 1",
+            ),
+            (
+                vec![0, 1],
+                vec![0.0, f32::INFINITY],
+                "non-finite sample at frame 1",
+            ),
+            (vec![0, 1], vec![0.0, 1.1], "out-of-range sample at frame 1"),
+        ] {
+            let batch = RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(UInt64Array::from(frames)),
+                    Arc::new(Float32Array::from(controls)),
+                ],
+            )
+            .unwrap();
+            let input = Arc::new(
+                TestMemoryExec::try_new(&[vec![batch]], Arc::clone(&schema), None).unwrap(),
+            );
+            let input = FramePlan::try_from_plan(&config, input).unwrap();
+            let oscillator = FrameSineOscExec::try_new_modulated(&config, 1.0, input).unwrap();
+            let error = oscillator
+                .execute(0, Arc::clone(&context))
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("sine modulation") && error.contains(reason),
+                "{error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn modulated_plan_preserves_control_duration_and_restarts_phase() {
+        let config = ExecutionConfig::new(8, 3).unwrap();
+        let source: Arc<dyn ExecutionPlan> =
+            Arc::new(FrameSineOscExec::try_new(&config, 0.0).unwrap());
+        let control: Arc<dyn ExecutionPlan> = Arc::new(GlobalLimitExec::new(source, 0, Some(7)));
+        let modulation = FramePlan::try_from_plan(&config, Arc::clone(&control)).unwrap();
+        let exec = Arc::new(FrameSineOscExec::try_new_modulated(&config, 1.0, modulation).unwrap());
+        assert_eq!(exec.children().len(), 1);
+        assert_matches!(exec.properties().boundedness, Boundedness::Bounded);
+        assert_matches!(
+            exec.required_input_distribution().as_slice(),
+            [Distribution::SinglePartition]
+        );
+        assert_eq!(exec.maintains_input_order(), vec![true]);
+        assert!(Arc::clone(&exec).with_new_children(vec![]).is_err());
+        let rewritten = Arc::clone(&exec).with_new_children(vec![control]).unwrap();
+        let context = Arc::new(TaskContext::default());
+        let first = collect(Arc::clone(&rewritten), Arc::clone(&context))
+            .await
+            .unwrap();
+        let second = collect(rewritten, context).await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.iter().map(|batch| batch.num_rows()).sum::<usize>(), 7);
+        let actual: Vec<f32> = first
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                    .unwrap()
+                    .values()
+                    .to_vec()
+            })
+            .collect();
+        for (frame, sample) in actual.into_iter().enumerate() {
+            assert!((sample - dsp::sine_at_frame(frame as u64, 8, 1.0)).abs() < 1e-6);
+        }
+    }
+
+    #[tokio::test]
+    async fn modulated_phase_starts_at_the_execution_origin() {
+        let config = ExecutionConfig::new(8, 3).unwrap().at_frame(3);
+        let control =
+            Arc::new(super::super::FrameSquareOscExec::try_new(&config, 2.0, 0.5).unwrap());
+        let control = FramePlan::try_from_plan(&config, control).unwrap();
+        let oscillator = FrameSineOscExec::try_new_modulated(&config, 1.0, control).unwrap();
+        let batch = oscillator
+            .execute(0, Arc::new(TaskContext::default()))
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        let actual = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        for (sample, phase) in actual.values().iter().zip([0.375, 0.4375, 0.6875]) {
+            assert!((sample - (std::f64::consts::TAU * phase).sin() as f32).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn modulation_requires_a_matching_schema_and_one_partition() {
+        let config = ExecutionConfig::new(8, 3).unwrap();
+        let other_config = ExecutionConfig::new(16, 3).unwrap();
+        let wrong_rate = Arc::new(FrameSineOscExec::try_new(&other_config, 1.0).unwrap());
+        let wrong_rate = FramePlan::try_from_plan(&other_config, wrong_rate).unwrap();
+        assert!(
+            FrameSineOscExec::try_new_modulated(&config, 1.0, wrong_rate)
+                .unwrap_err()
+                .to_string()
+                .contains("must match")
+        );
+
+        let multiple = Arc::new(
+            TestMemoryExec::try_new(&[vec![], vec![]], frame_schema(&config), None).unwrap(),
+        );
+        let multiple_plan = FramePlan::try_from_plan(&config, multiple.clone()).unwrap();
+        assert!(
+            FrameSineOscExec::try_new_modulated(&config, 1.0, multiple_plan)
+                .unwrap_err()
+                .to_string()
+                .contains("one modulation partition")
+        );
+        let control = Arc::new(FrameSineOscExec::try_new(&config, 0.0).unwrap());
+        let control = FramePlan::try_from_plan(&config, control).unwrap();
+        let oscillator =
+            Arc::new(FrameSineOscExec::try_new_modulated(&config, 1.0, control).unwrap());
+        // Rewrites may temporarily supply multiple partitions; execution must
+        // reject them unless the optimizer enforces SinglePartition first.
+        let rewritten = oscillator.with_new_children(vec![multiple]).unwrap();
+        let error = rewritten
+            .execute(0, Arc::new(TaskContext::default()))
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("one modulation partition"));
     }
 
     fn test_config() -> RenderConfig {

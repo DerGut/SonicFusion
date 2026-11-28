@@ -66,7 +66,10 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
     for id in &order {
         let kind = nodes[id];
         let call = match kind {
-            NodeKind::Sine { frequency_hz } => format!("sine({})", num(*frequency_hz)),
+            NodeKind::Sine { frequency_hz } => match wired(id, "frequency") {
+                None => format!("sine({})", num(*frequency_hz)),
+                Some(control) => format!("sine({}, {})", num(*frequency_hz), var(control)),
+            },
             NodeKind::Square {
                 frequency_hz,
                 pulse_width,

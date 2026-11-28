@@ -173,19 +173,21 @@ fn prepare_node(
             if incoming.is_some() {
                 return Err(bad(format!("{name} is a source and takes no input")));
             }
-            if name == "sawtooth"
+            if matches!(name, "sine" | "sawtooth")
                 && let [Arg::Number(hz), Arg::Ref(modulation)] = args
             {
-                return Ok(Node::Sawtooth(
-                    *hz,
-                    Some(reference(source, at, bindings, modulation)?),
-                ));
+                let modulation = Some(reference(source, at, bindings, modulation)?);
+                return Ok(if name == "sine" {
+                    Node::Sine(*hz, modulation)
+                } else {
+                    Node::Sawtooth(*hz, modulation)
+                });
             }
             let numbers =
                 numeric_args(source, at, name, args, if name == "square" { 2 } else { 1 })?;
             let hz = numbers[0];
             if name == "sine" {
-                Ok(Node::Sine(hz))
+                Ok(Node::Sine(hz, None))
             } else if name == "sawtooth" {
                 Ok(Node::Sawtooth(hz, None))
             } else {

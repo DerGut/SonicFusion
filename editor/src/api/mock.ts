@@ -327,9 +327,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
       const from = feeds.get(`${id}:${port}`);
       return from ? signal(from) : new Float32Array(frames);
     };
-    const sawControl = node?.kind === "sawtooth" && feeds.has(`${id}:frequency`) ? input("frequency") : null;
+    const frequencyControl = (node?.kind === "sawtooth" || node?.kind === "sine") && feeds.has(`${id}:frequency`) ? input("frequency") : null;
     const baseHz = Number(node?.params.frequency_hz ?? 0);
-    let sawPhase = (start * baseHz / INFO.sample_rate_hz) % 1;
+    let modulatedPhase = (start * baseHz / INFO.sample_rate_hz) % 1;
     const p = (name: string) => Number(node?.params[name] ?? 0);
     if (node?.kind === "envelope") {
       const samples = envelopeSamples(input("in"), input("gate"), node.params);
@@ -343,20 +343,20 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
       const t = (start + n) / INFO.sample_rate_hz;
       const phase = (p("frequency_hz") * t) % 1;
       switch (node.kind) {
-        case "sine":
-          out[n] = Math.sin(2 * Math.PI * phase);
-          break;
         case "square":
           out[n] = phase < p("pulse_width") ? 1 : -1;
           break;
-        case "sawtooth":
-          out[n] = 2 * (sawControl ? sawPhase : phase) - 1;
-          if (sawControl) {
+        case "sine":
+        case "sawtooth": {
+          const currentPhase = frequencyControl ? modulatedPhase : phase;
+          out[n] = node.kind === "sine" ? Math.sin(2 * Math.PI * currentPhase) : 2 * currentPhase - 1;
+          if (frequencyControl) {
             const nyquist = INFO.sample_rate_hz / 2 * (1 - Number.EPSILON / 2);
-            const hz = Math.min(baseHz * 2 ** sawControl[n], nyquist);
-            sawPhase = (sawPhase + hz / INFO.sample_rate_hz) % 1;
+            const hz = Math.min(baseHz * 2 ** frequencyControl[n], nyquist);
+            modulatedPhase = (modulatedPhase + hz / INFO.sample_rate_hz) % 1;
           }
           break;
+        }
         case "noise":
           out[n] = whiteNoise(start + n, noiseKey);
           break;

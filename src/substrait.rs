@@ -211,7 +211,7 @@ impl Decoder<'_> {
                 let hz = sine
                     .frequency_hz
                     .ok_or_else(|| invalid("Sine requires frequency_hz"))?;
-                (Node::Sine(hz), true, 1, 1)
+                (Node::Sine(hz, None), true, 1, 1)
             }
             Some(RelType::Project(project)) => {
                 let gain = projection_gain(project, self.multiply)?;

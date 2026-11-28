@@ -3,8 +3,15 @@
     "kind": "sine",
     "label": "Sine",
     "category": "source",
-    "signature": "sine(freq)",
-    "inputs": [],
+    "signature": "sine(freq, [fm])",
+    "inputs": [
+      {
+        "name": "frequency",
+        "label": "Frequency modulation",
+        "signal": "control",
+        "required": false
+      }
+    ],
     "variadic_input": null,
     "has_output": true,
     "params": [
