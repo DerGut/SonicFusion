@@ -85,7 +85,7 @@
     "kind": "low_pass",
     "label": "Low-pass",
     "category": "filter",
-    "signature": "lpf(cutoff)",
+    "signature": "lpf(cutoff, mix?)",
     "inputs": [
       {
         "name": "in",
@@ -112,6 +112,15 @@
         "default": 1200.0,
         "scale": "log",
         "frequency": "cutoff"
+      },
+      {
+        "name": "mix",
+        "label": "Mix",
+        "unit": "%",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0,
+        "scale": "linear"
       }
     ]
   },

@@ -39,8 +39,22 @@ pub fn low_pass(
     audio: FramePlan,
     cutoff: Cutoff,
 ) -> Result<FramePlan> {
+    low_pass_with_mix(config, audio, cutoff, 1.0)
+}
+
+/// Builds a low-pass filter blended with its dry input at the given wet ratio.
+///
+/// Zero passes the input through exactly and one returns the filtered signal.
+/// The filter advances its own state independently of the blend.
+pub fn low_pass_with_mix(
+    config: &impl AsRef<ExecutionConfig>,
+    audio: FramePlan,
+    cutoff: Cutoff,
+    mix: f64,
+) -> Result<FramePlan> {
+    validate_mix(mix)?;
     let config = config.as_ref();
-    let plan = match cutoff {
+    let mut plan = match cutoff {
         Cutoff::ConstantHz(hz) => FrameLowPassFilterExec::try_new(config, audio.into_plan(), hz)?,
         Cutoff::Modulated { cutoff } => {
             let (base_hz, depth_hz) = default_cutoff_mapping(config);
@@ -53,7 +67,25 @@ pub fn low_pass(
             )?
         }
     };
+    plan.mix = mix;
     FramePlan::try_from_plan(config, Arc::new(plan))
+}
+
+pub(crate) fn validate_mix(mix: f64) -> Result<()> {
+    if !(0.0..=1.0).contains(&mix) {
+        return Err(DataFusionError::Plan(
+            "low-pass mix must be between 0 and 1".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn blend(dry: f32, wet: f64, mix: f64) -> f32 {
+    match mix {
+        0.0 => dry,
+        1.0 => wet as f32,
+        _ => ((1.0 - mix) * f64::from(dry) + mix * wet) as f32,
+    }
 }
 
 pub(crate) fn validate_constant_cutoff(cutoff_hz: f64, sample_rate_hz: u32) -> Result<()> {
@@ -103,6 +135,7 @@ pub struct FrameLowPassFilterExec {
     input: Arc<dyn ExecutionPlan>,
     cutoff: CutoffState,
     start_frame: u64,
+    mix: f64,
     properties: Arc<PlanProperties>,
 }
 
@@ -195,6 +228,7 @@ impl FrameLowPassFilterExec {
                 decay: exponent.exp(),
             },
             config.start_frame(),
+            1.0,
         ))
     }
 
@@ -240,10 +274,11 @@ impl FrameLowPassFilterExec {
                 sample_rate_hz: config.sample_rate_hz(),
             },
             config.start_frame(),
+            1.0,
         ))
     }
 
-    fn new(input: Arc<dyn ExecutionPlan>, cutoff: CutoffState, start_frame: u64) -> Self {
+    fn new(input: Arc<dyn ExecutionPlan>, cutoff: CutoffState, start_frame: u64, mix: f64) -> Self {
         let mut equivalence = EquivalenceProperties::new(input.schema());
         equivalence.add_ordering(super::frame_ordering());
         let emission_type = match &cutoff {
@@ -262,6 +297,7 @@ impl FrameLowPassFilterExec {
             input,
             cutoff,
             start_frame,
+            mix,
             properties,
         }
     }
@@ -287,6 +323,7 @@ impl FrameLowPassFilterExec {
         let mut state = 0.0_f64;
         let mut last_frame = None;
         let start_frame = self.start_frame;
+        let mix = self.mix;
         let stream = self.input.execute(partition, context)?.map(move |batch| {
             let batch = batch?;
             let audio = AudioBatch::new(&batch, &schema)?;
@@ -304,7 +341,7 @@ impl FrameLowPassFilterExec {
                     decay.powf(elapsed as f64)
                 };
                 state = retained * state + alpha * f64::from(sample);
-                filtered.push(state as f32);
+                filtered.push(blend(sample, state, mix));
                 last_frame = Some(frame);
             }
 
@@ -338,6 +375,7 @@ impl FrameLowPassFilterExec {
         let modulation = cutoff.execute(partition, context)?;
         let mut cursor = ModulationCursor::new(modulation, Arc::clone(&schema));
         let start_frame = self.start_frame;
+        let mix = self.mix;
         let output = async_stream::try_stream! {
             let mut state = 0.0_f64;
             let mut last_audio_frame = None;
@@ -368,7 +406,7 @@ impl FrameLowPassFilterExec {
                         state = decay * state + alpha * input;
                         next_frame += 1;
                     }
-                    filtered.push(state as f32);
+                    filtered.push(blend(sample, state, mix));
                     last_audio_frame = Some(frame);
                 }
 
@@ -449,7 +487,12 @@ impl ExecutionPlan for FrameLowPassFilterExec {
                 }
             }
         };
-        Ok(Arc::new(Self::new(input, cutoff, self.start_frame)))
+        Ok(Arc::new(Self::new(
+            input,
+            cutoff,
+            self.start_frame,
+            self.mix,
+        )))
     }
 
     fn execute(

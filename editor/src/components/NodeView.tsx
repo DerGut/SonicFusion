@@ -91,7 +91,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       const props = {
         id: `${node.id}-${param.name}`,
         descriptor: param,
-        value: Number(node.params[param.name]),
+        value: Number(node.params[param.name] ?? param.default),
         invalid: paramIssue(param.name),
         onBeginContinuous: actions.beginContinuous,
         onChange: (value: number, continuous: boolean) => actions.setParam(node.id, param.name, value, continuous),

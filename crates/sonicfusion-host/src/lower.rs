@@ -80,13 +80,18 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
                     num(*factor)
                 )
             }
-            NodeKind::LowPass { cutoff_hz } => {
+            NodeKind::LowPass { cutoff_hz, mix } => {
                 let audio = input(id, "in").map_err(one)?;
                 let cutoff = match wired(id, "cutoff") {
                     Some(control) => var(control).to_string(),
                     None => num(*cutoff_hz),
                 };
-                format!("lpf({}, {cutoff})", var(&audio))
+                let mix_arg = if *mix == 1.0 {
+                    String::new()
+                } else {
+                    format!(", {}", num(*mix))
+                };
+                format!("lpf({}, {cutoff}{mix_arg})", var(&audio))
             }
             NodeKind::Mix { weights } => {
                 let mut refs = Vec::with_capacity(weights.len());

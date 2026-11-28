@@ -215,6 +215,14 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
     if (!reachable.has(node.id)) {
       issues.push({ ...issue("unreachable", node.id, "not connected to the output; it won't be played"), severity: "warning" });
     }
+    const mix = node.params.mix;
+    if (node.kind === "low_pass" && mix !== undefined && (typeof mix !== "number" || !(mix >= 0 && mix <= 1))) {
+      issues.push({
+        ...issue("invalid_parameter", node.id, "low-pass mix must be between 0% and 100%"),
+        param: "mix",
+        severity: reachable.has(node.id) ? "error" : "warning",
+      });
+    }
     for (const name of ["frequency_hz", "cutoff_hz"]) {
       const value = node.params[name];
       if (typeof value === "number" && value >= INFO.sample_rate_hz / 2) {
@@ -242,6 +250,8 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     };
     const p = (name: string) => Number(node?.params[name] ?? 0);
     const noiseKey = mix32(seeds.get(id) ?? 0);
+    const lowPassMix = Number(node?.params.mix ?? 1);
+    let wet = 0;
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
       const phase = (p("frequency_hz") * t) % 1;
@@ -273,7 +283,11 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           const control = feeds.has(`${id}:cutoff`) ? input("cutoff")[n] : null;
           const cutoff = control === null ? p("cutoff_hz") : INFO.cutoff_modulation.base_hz + INFO.cutoff_modulation.depth_hz * control;
           const a = 1 - Math.exp((-2 * Math.PI * cutoff) / INFO.sample_rate_hz);
-          out[n] = (n > 0 ? out[n - 1] * (1 - a) : 0) + a * input("in")[n];
+          const dry = input("in")[n];
+          wet = Math.fround(wet * (1 - a) + a * dry);
+          if (lowPassMix === 0) out[n] = dry;
+          else if (lowPassMix === 1) out[n] = wet;
+          else out[n] = (1 - lowPassMix) * dry + lowPassMix * wet;
           break;
         }
       }

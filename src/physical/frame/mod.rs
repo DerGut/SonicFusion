@@ -8,8 +8,8 @@ mod square;
 mod white_noise;
 
 pub use gain::FrameGainExec;
-pub(crate) use low_pass_filter::validate_constant_cutoff;
-pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass};
+pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass, low_pass_with_mix};
+pub(crate) use low_pass_filter::{validate_constant_cutoff, validate_mix as validate_low_pass_mix};
 pub use mix::FrameMixExec;
 pub use plan::FramePlan;
 pub use sawtooth::FrameSawToothOscExec;
