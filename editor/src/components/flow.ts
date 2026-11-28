@@ -11,7 +11,7 @@ import type {
   Signal,
 } from "../api/types";
 import type { DocNode } from "../model/document";
-import type { FrequencyMode } from "../model/pitch";
+import type { FrequencyMode, FrequencyRole } from "../model/pitch";
 
 /** Fixed row metrics, so port handles line up with their rows. */
 export const HEADER_HEIGHT = 34;
@@ -61,7 +61,7 @@ export interface SfNodeData extends Record<string, unknown> {
   sources: Record<string, { id: string; label: string }>;
   /** Ids of the wires leaving this node, oldest first. */
   outgoing: string[];
-  feedsControl: boolean;
+  frequencyRole: FrequencyRole;
   issues: GraphIssue[];
   session: SessionInfo;
   ceilingDb: number;

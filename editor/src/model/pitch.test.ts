@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultFrequencyMode, detuneBounds, formatCents, noteName, parseFrequency, pitchFromHz, pitchToHz, snapSliderHz } from "./pitch";
+import { bpmToHz, defaultFrequencyMode, detuneBounds, formatCents, hzToBpm, noteName, parseFrequency, pitchFromHz, pitchToHz, snapSliderHz, snapTempoHz } from "./pitch";
 
 describe("frequency and pitch", () => {
-  it("defaults audible audio signals to notes and control or subaudio signals to Hz", () => {
-    expect(defaultFrequencyMode(220, false)).toBe("note");
-    expect(defaultFrequencyMode(440, true)).toBe("hz");
-    expect(defaultFrequencyMode(0.5, false)).toBe("hz");
+  it("defaults subaudio gate oscillators to BPM, audio pitches to notes, and other rates to Hz", () => {
+    expect(defaultFrequencyMode(220, "audio", true)).toBe("note");
+    expect(defaultFrequencyMode(440, "control", true)).toBe("hz");
+    expect(defaultFrequencyMode(0.5, "audio", true)).toBe("hz");
+    expect(defaultFrequencyMode(2, "gate", true)).toBe("bpm");
+    expect(defaultFrequencyMode(2, "control", true)).toBe("hz");
+    expect(defaultFrequencyMode(20, "gate", true)).toBe("hz");
+    expect(defaultFrequencyMode(2, "gate", false)).toBe("hz");
+  });
+
+  it("snaps BPM without crossing the oscillator range or the unit boundary", () => {
+    expect(snapTempoHz(2.008, 0.01, 20_000)).toBe(2);
+    expect(snapTempoHz(0.01, 0.01, 20_000)).toBe(bpmToHz(1));
+    expect(snapTempoHz(19.999, 0.01, 20_000)).toBe(bpmToHz(1199));
+    expect(snapTempoHz(19.999, 0.01, 20_000, 1)).toBe(20);
+    expect(snapTempoHz(19.999, 0.01, 19.999, 1)).toBe(19.999);
+    expect(snapTempoHz(bpmToHz(121), 0.01, 20_000, 1)).toBe(bpmToHz(122));
+    expect(snapTempoHz(bpmToHz(125), 0.01, 2)).toBe(2);
   });
 
   it("steps by semitone and snaps within the editor range", () => {
@@ -30,6 +44,24 @@ describe("frequency and pitch", () => {
     expect(pitchToHz({ midi: low, cents: nearFloor.min })).toBeGreaterThanOrEqual(20);
     expect(detuneBounds(69, 20, 20_000)).toEqual({ min: -50, max: 50 });
     expect(detuneBounds(pitchFromHz(24_500)!.midi, 20, 20_000)).toBeNull();
+  });
+
+  it("converts BPM entry to Hz without changing Hz or note entry", () => {
+    expect(parseFrequency("120", "bpm")).toBe(2);
+    expect(parseFrequency(" 0.6 bpm ", "bpm")).toBe(0.01);
+    expect(parseFrequency("0", "bpm")).toBe(0);
+    expect(parseFrequency("BPM", "bpm")).toBeNaN();
+    expect(parseFrequency("120 BPM")).toBeNaN();
+    expect(parseFrequency("120 bpm", "note", true)).toBe(2);
+    expect(parseFrequency("1199.5 bpm", "note", true)).toBe(bpmToHz(1199.5));
+    expect(parseFrequency("1200 bpm", "note", true)).toBeNaN();
+    expect(parseFrequency("-1 bpm", "hz", true)).toBeNaN();
+    expect(parseFrequency("2 Hz", "bpm")).toBe(2);
+    expect(parseFrequency("C#4", "bpm")).toBe(parseFrequency("C#4"));
+    expect(parseFrequency("Hz")).toBeNaN();
+    expect(parseFrequency("120", "note")).toBe(120);
+    expect(parseFrequency("A4", "note")).toBe(440);
+    expect(hzToBpm(2)).toBe(120);
   });
 
   it("uses A4 = 440 Hz and C4 = MIDI 60", () => {

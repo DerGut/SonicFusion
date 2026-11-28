@@ -75,14 +75,17 @@ export function Canvas(props: Props) {
     const labelsById = new Map(doc.nodes.map((node) => [node.id, nodeLabel(node)]));
     const outgoingByNode = new Map<string, string[]>();
     const portsByNode = new Map(doc.nodes.map((node) => [node.id, inputPorts(node, catalog)]));
-    const controlSources = new Set<string>();
+    const controlSources = new Map<string, "control" | "gate">();
     for (const wire of doc.wires) {
       const sources = sourcesByNode.get(wire.to.node) ?? {};
       sources[wire.to.port] = { id: wire.from, label: labelsById.get(wire.from) ?? wire.from };
       sourcesByNode.set(wire.to.node, sources);
       outgoingByNode.set(wire.from, [...(outgoingByNode.get(wire.from) ?? []), wireId(wire)]);
       const port = portsByNode.get(wire.to.node)?.find((candidate) => candidate.name === wire.to.port);
-      if (port?.signal === "control") controlSources.add(wire.from);
+      if (port?.signal === "control") {
+        if (port.name === "gate") controlSources.set(wire.from, "gate");
+        else if (!controlSources.has(wire.from)) controlSources.set(wire.from, "control");
+      }
     }
     {
       const old = new Map(nodesRef.current.map((node) => [node.id, node]));
@@ -96,7 +99,7 @@ export function Canvas(props: Props) {
           ports: portsByNode.get(node.id) ?? [],
           sources: sourcesByNode.get(node.id) ?? {},
           outgoing: outgoingByNode.get(node.id) ?? [],
-          feedsControl: controlSources.has(node.id),
+          frequencyRole: controlSources.get(node.id) ?? "audio",
           issues: issues.filter((issue) => issue.node === node.id),
           session,
           ceilingDb,
@@ -294,7 +297,7 @@ function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
     a.session === b.session &&
     a.ceilingDb === b.ceilingDb &&
     a.actions === b.actions &&
-    a.feedsControl === b.feedsControl &&
+    a.frequencyRole === b.frequencyRole &&
     JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
     JSON.stringify(a.sources) === JSON.stringify(b.sources) &&
     JSON.stringify(a.outgoing) === JSON.stringify(b.outgoing) &&

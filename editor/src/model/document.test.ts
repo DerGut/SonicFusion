@@ -169,12 +169,12 @@ describe("document", () => {
     expect(() => parseDocument(JSON.stringify(unknown))).toThrow("malformed wire");
   });
 
-  it("round-trips a frequency display override only in the editor document", () => {
+  it.each(["hz", "bpm"] as const)("round-trips a %s display override only in the editor document", (mode) => {
     const doc = studio();
-    const changed = setFrequencyMode(doc, "osc_a", "hz");
+    const changed = setFrequencyMode(doc, "osc_a", mode);
     expect(toGraph(changed)).toEqual(toGraph(doc));
     const restored = parseDocument(JSON.stringify(changed));
-    expect(restored.nodes.find((node) => node.id === "osc_a")?.frequencyMode).toBe("hz");
+    expect(restored.nodes.find((node) => node.id === "osc_a")?.frequencyMode).toBe(mode);
     expect(setFrequencyMode(restored, "osc_a")).toEqual(doc);
   });
 
