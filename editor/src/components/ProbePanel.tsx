@@ -10,6 +10,8 @@ import { describe } from "../state/useEngineSession";
 import { Icon } from "./icons";
 import { NodeTitle } from "./NodeTitle";
 import { SlowScope } from "./SlowScope";
+import { PatternEditor } from "./PatternEditor";
+import { activeSteps, readSteps, writeSteps } from "../model/pattern";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
@@ -23,18 +25,25 @@ type Preview = { kind: "short"; window: ProbeWindow } | { kind: "slow"; seconds:
  * output from the draft at the session's current frame; nothing is tapped
  * from the device stream.
  */
-export function ProbePanel({ client, graph, node, playing, draft, session, onRename, onClose }: {
+export function ProbePanel({ client, graph, node, pattern, playing, draft, session, onRename, onPattern, onBeginContinuous, onClose }: {
   client: EngineClient;
   graph: GraphSpec;
   node: DocNode;
+  /** The node's step-pattern param, if it has one. */
+  pattern?: { name: string; length: number };
   playing: boolean;
   /** The draft differs from what is playing, so the probe shows unapplied edits. */
   draft: boolean;
   session: SessionInfo;
   onRename: (id: string, name: string) => void;
+  /** Saves a new pattern; `continuous` while painting, so one drag is one undo step. */
+  onPattern: (steps: number[], continuous: boolean) => void;
+  onBeginContinuous: () => void;
   onClose: () => void;
 }) {
-  const [view, setView] = useState<"scope" | "spectrum">("scope");
+  // A node with a pattern opens on it; its Scope shows the resulting gate.
+  const [view, setView] = useState<"pattern" | "scope" | "spectrum">(pattern ? "pattern" : "scope");
+  const tabs = pattern ? (["pattern", "scope", "spectrum"] as const) : (["scope", "spectrum"] as const);
   const [preview, setPreview] = useState<Preview | null>(null);
   const inFlight = useRef<Promise<Preview> | null>(null);
   const slowSeconds = view === "scope" ? slowScopeSeconds(graph, node) : null;
@@ -71,12 +80,13 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
         if (!cancelled && playing) timer = setTimeout(run, LIVE_INTERVAL_MS);
       }
     };
-    timer = setTimeout(run, playing ? 0 : IDLE_DEBOUNCE_MS);
+    // The Pattern tab shows no signal, so it doesn't probe.
+    if (view !== "pattern") timer = setTimeout(run, playing ? 0 : IDLE_DEBOUNCE_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [client, graphJson, node.id, playing, slowSeconds]);
+  }, [client, graphJson, node.id, playing, slowSeconds, view]);
 
   const probe = slowSeconds === null && preview?.kind === "short" ? preview.window : null;
   const slow = preview?.kind === "slow" && preview.seconds === slowSeconds ? preview.window : null;
@@ -103,16 +113,16 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
         <Icon name="probe" />
         <NodeTitle node={node} onRename={onRename} inProbe />
         <div role="tablist" aria-label="Probe view" className="tabs">
-          {(["scope", "spectrum"] as const).map((tab) => (
+          {tabs.map((tab) => (
             <button key={tab} type="button" role="tab" aria-selected={view === tab} aria-controls="probe-plot"
               className={view === tab ? "active" : ""} onClick={() => setView(tab)}>
-              {tab === "scope" ? "Scope" : "Spectrum"}
+              {tab === "pattern" ? "Pattern" : tab === "scope" ? "Scope" : "Spectrum"}
             </button>
           ))}
         </div>
         {draft && <span className="draft-tag" title="The probe follows your edits; the meter follows what is playing">draft, not applied</span>}
         <span className="hint">
-          {displayed
+          {view === "pattern" ? "edits the draft · Scope shows the resulting gate" : displayed
             ? `rendered by the ${client.live ? "engine" : "mock engine"} at frame ${displayed.start_frame} · drawn here`
             : unavailable
               ? "no signal"
@@ -122,25 +132,34 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
         <button type="button" className="icon-button" aria-label="Close probe" onClick={onClose}><Icon name="close" size={12} /></button>
       </div>
       <div className="probe-body">
-        <div className="plot" id="probe-plot" role="tabpanel" aria-label={view === "scope" ? "Scope" : "Spectrum"}>
-          {unavailable ? (
+        <div className="plot" id="probe-plot" role="tabpanel"
+          aria-label={view === "pattern" ? "Pattern" : view === "scope" ? "Scope" : "Spectrum"}>
+          {view === "pattern" && pattern ? (
+            <PatternEditor steps={readSteps(node.params[pattern.name], pattern.length)}
+              gateLength={Number(node.params.gate_length ?? 1)} onBeginContinuous={onBeginContinuous}
+              onChange={(steps, continuous) => onPattern(writeSteps(steps), continuous)} />
+          ) : unavailable ? (
             <p className={`plot-message${unavailable.problem ? " error" : ""}`}>{unavailable.text}</p>
           ) : view === "scope" ? (
             slowSeconds === null ? <Scope samples={samples} rate={rate} /> : slow && <SlowScope scope={slow} />
           ) : (
             <Spectrum spectrum={spectrum} rate={rate} cutoff={cutoff} />
           )}
-          <span className="plot-label">
+          <span className="plot-label" hidden={view === "pattern"}>
             {view === "scope"
               ? slowSeconds === null
                 ? `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
-                : node.kind === "envelope"
+                : node.kind === "sequencer"
+                  ? `${formatSeconds(slowFrames / rate)} · one bar · gate 0 to 1`
+                  : node.kind === "envelope"
                   ? `${formatSeconds(slowFrames / rate)} · ${slow?.gate?.kind === "bands" ? "mixed gate shaded" : "gate dashed"} · peak per 10 ms`
                   : `${formatSeconds(slowFrames / rate)} · waveform`
               : "dBFS · 20 Hz – 20 kHz · log"}
           </span>
         </div>
-        <dl className="readouts">
+        {view === "pattern" && pattern ? (
+          <PatternReadouts graph={graph} node={node} pattern={pattern} />
+        ) : <dl className="readouts">
           <div><dt>Peak</dt><dd>{displayed ? `${formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS` : "—"}</dd></div>
           <div hidden={slowSeconds !== null}>
             <dt>Strongest partial</dt>
@@ -154,9 +173,30 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
           )}
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
           <div><dt>Window</dt><dd>{slowSeconds === null ? PROBE_FRAMES : slowFrames} frames</dd></div>
-        </dl>
+        </dl>}
       </div>
     </section>
+  );
+}
+
+/** What drives the pattern and how long each step and gate lasts. */
+function PatternReadouts({ graph, node, pattern }: { graph: GraphSpec; node: DocNode; pattern: { name: string; length: number } }) {
+  const steps = readSteps(node.params[pattern.name], pattern.length);
+  const clock = graph.wires.find((wire) => wire.to.node === node.id && wire.to.port === "clock")?.from;
+  const bpm = Number(node.params.tempo_bpm);
+  const gate = Number(node.params.gate_length);
+  const step = 60 / bpm / 4;
+  return (
+    <dl className="readouts">
+      <div><dt>Steps on</dt><dd>{activeSteps(steps)} of {pattern.length}</dd></div>
+      <div><dt>Advances</dt><dd>{clock ? "on clock edges" : `${Number(bpm.toPrecision(4))} BPM · 16ths`}</dd></div>
+      {!clock && Number.isFinite(step) && step > 0 && (
+        <div><dt>Step</dt><dd>{formatSeconds(step)}</dd></div>
+      )}
+      <div title={clock ? "With a clock, the gate is a share of the last clock period" : undefined}>
+        <dt>Gate</dt><dd>{Number.isFinite(gate) ? `${Number((gate * 100).toFixed(1))}% of a step` : "—"}</dd>
+      </div>
+    </dl>
   );
 }
 

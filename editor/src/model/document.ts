@@ -92,6 +92,7 @@ export function addNode(
     const { weight, default: count } = descriptor.variadic_input;
     params[weight.name] = Array.from({ length: count }, () => weight.default);
   }
+  if (descriptor.pattern) params[descriptor.pattern.name] = [...descriptor.pattern.default];
   const id = nextNodeId(doc, kind);
   return [{ ...doc, nodes: [...doc.nodes, { id, kind, params, position }] }, id];
 }
@@ -257,7 +258,7 @@ export function wireId(wire: Wire): string {
   return `${wire.from}->${wire.to.node}:${wire.to.port}`;
 }
 
-const KINDS = new Set<NodeKind>(["constant", "sine", "square", "sawtooth", "noise", "gain", "low_pass", "mix", "envelope", "output"]);
+const KINDS = new Set<NodeKind>(["constant", "sine", "square", "sawtooth", "noise", "gain", "low_pass", "mix", "envelope", "sequencer", "output"]);
 
 /**
  * Parse a saved project, checking the shape the editor relies on. The engine

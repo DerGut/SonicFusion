@@ -102,6 +102,36 @@ The dashed gate marks transitions at their frame offsets. For dense gates,
 shading marks 10 ms intervals that contain both gate states. The scope
 approximates live history with a bounded warm-up.
 
+### Step sequencer
+
+`sequencer([steps], tempo_bpm, gate_length)` emits a 0/1 gate from a one-bar
+pattern of 16 steps, each 0 (off) or 1 (on). The internal tempo advances four
+steps per beat. Pass a control signal as a fourth argument to advance one step
+per rising edge instead:
+
+```text
+sequencer([1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], 120, 0.5) -> $gate;
+sawtooth(55) -> envelope($gate, 0.005, 0.12, 0.4, 0.08) -> gain(0.2) -> out
+```
+
+Gate length is the share of a step the gate stays open, between 0 and 1. A
+length of 1 holds the gate open across consecutive active steps. Without a
+clock, the position depends only on the absolute frame, so a live graph
+replacement stays on the beat. A clock edge is a sample at or below zero
+followed by one above zero. Each execution starts closed and counts edges from
+its first frame, so a replacement restarts the bar on the next edge. With a
+clock, the gate stays open for its share of the last clock period. Until a
+second edge has measured that period, the gate follows the clock's high phase.
+For 16ths, run the clock at four times the beat rate: a square at 480 BPM gives
+16ths at 120 BPM.
+
+In the editor, the node shows the tempo (or the connected clock), a strip of
+the pattern, and the gate length. Select it to edit the pattern in the panel's
+**Pattern** tab: click or drag to paint steps, use Space or Enter on the
+focused step, and Clear, Shift or Invert the whole bar. The **Scope** tab shows
+one bar of the gate, up to 4 s. Tempo sliders cover 20–300 BPM; typed values
+and the DSL accept any positive tempo whose steps last at least one frame.
+
 ## Direct playback
 
 ```sh

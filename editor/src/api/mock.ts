@@ -215,6 +215,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in"];
     case "envelope":
       return ["in", "gate"];
+    case "sequencer":
+      return [];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -314,8 +316,59 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
       }
     }
     issues.push(...envelopeParamIssues(node).map((problem) => ({ ...problem, severity })));
+    issues.push(...sequencerParamIssues(node).map((problem) => ({ ...problem, severity })));
   }
   return issues;
+}
+
+function sequencerParamIssues(node: NodeSpec): GraphIssue[] {
+  if (node.kind !== "sequencer") return [];
+  const issues: GraphIssue[] = [];
+  const { steps, tempo_bpm: tempo, gate_length: gate } = node.params;
+  if (!Array.isArray(steps) || steps.length !== 16 || steps.some((step) => step !== 0 && step !== 1)) {
+    issues.push({ ...issue("invalid_parameter", node.id, "the pattern needs 16 steps, each on or off"), param: "steps" });
+  }
+  const ceiling = INFO.sample_rate_hz * 15;
+  if (typeof tempo !== "number" || !Number.isFinite(tempo) || tempo <= 0 || tempo > ceiling) {
+    issues.push({ ...issue("invalid_parameter", node.id, `tempo must be greater than 0 and at most ${ceiling} BPM`), param: "tempo_bpm" });
+  }
+  if (typeof gate !== "number" || !(gate >= 0 && gate <= 1)) {
+    issues.push({ ...issue("invalid_parameter", node.id, "gate length must be between 0% and 100%"), param: "gate_length" });
+  }
+  return issues;
+}
+
+/**
+ * The engine's one-bar sequencer: the internal tempo runs four steps per beat
+ * on the absolute frame grid; a clock advances one step per rising edge from
+ * the probe origin and sizes the gate from the last clock period.
+ */
+function sequencerSamples(clock: Float32Array | null, params: NodeSpec["params"], start: number, frames: number): Float32Array {
+  const steps = Array.isArray(params.steps) ? params.steps : [];
+  const gate = Number(params.gate_length);
+  const open = (step: number, progress: number) => steps[step] === 1 && progress < gate;
+  const out = new Float32Array(frames);
+  if (!clock) {
+    const framesPerStep = (INFO.sample_rate_hz * 60) / (Number(params.tempo_bpm) * 4);
+    for (let n = 0; n < frames; n++) {
+      const position = (start + n) / framesPerStep;
+      out[n] = open(Math.floor(position) % 16, position % 1) ? 1 : 0;
+    }
+    return out;
+  }
+  let step = -1, high = false, lastEdge = -1, period = 0;
+  for (let n = 0; n < frames; n++) {
+    const nowHigh = clock[n] > 0;
+    if (nowHigh && !high) {
+      if (lastEdge >= 0) period = n - lastEdge;
+      lastEdge = n;
+      step = (step + 1) % 16;
+    }
+    high = nowHigh;
+    if (step < 0) continue;
+    out[n] = (period > 0 ? open(step, (n - lastEdge) / period) : steps[step] === 1 && high) ? 1 : 0;
+  }
+  return out;
 }
 
 /** A rough model of the engine's nodes for drawing a probe. */
@@ -339,6 +392,11 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     const p = (name: string) => Number(node?.params[name] ?? 0);
     if (node?.kind === "envelope") {
       const samples = envelopeSamples(input("in"), input("gate"), node.params);
+      cache.set(id, samples);
+      return samples;
+    }
+    if (node?.kind === "sequencer") {
+      const samples = sequencerSamples(feeds.has(`${id}:clock`) ? input("clock") : null, node.params, start, frames);
       cache.set(id, samples);
       return samples;
     }

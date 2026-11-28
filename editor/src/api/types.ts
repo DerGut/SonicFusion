@@ -11,6 +11,7 @@ export type NodeKind =
   | "low_pass"
   | "mix"
   | "envelope"
+  | "sequencer"
   | "output";
 
 export type ParamValue = number | number[];
@@ -57,6 +58,14 @@ export interface ParamDescriptor {
   frequency?: "pitch" | "cutoff";
 }
 
+/** A list param of `length` entries, each 0 (off) or 1 (on). */
+export interface PatternParam {
+  name: string;
+  label: string;
+  length: number;
+  default: number[];
+}
+
 export interface VariadicInput {
   prefix: string;
   weight: ParamDescriptor;
@@ -71,6 +80,8 @@ export interface NodeDescriptor {
   signature: string;
   inputs: PortDescriptor[];
   variadic_input: VariadicInput | null;
+  /** A fixed-length list param edited as a step pattern. */
+  pattern?: PatternParam;
   has_output: boolean;
   params: ParamDescriptor[];
 }
