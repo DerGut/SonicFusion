@@ -131,7 +131,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
               ? slowSeconds === null
                 ? `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
                 : node.kind === "envelope"
-                  ? `${formatSeconds(slowFrames / rate)} · gate dashed · peak per 10 ms`
+                  ? `${formatSeconds(slowFrames / rate)} · ${slow?.gate?.kind === "bands" ? "mixed gate shaded" : "gate dashed"} · peak per 10 ms`
                   : `${formatSeconds(slowFrames / rate)} · waveform`
               : "dBFS · 20 Hz – 20 kHz · log"}
           </span>

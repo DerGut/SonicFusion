@@ -48,9 +48,17 @@ it("persists envelope settings and wires, and shapes a square-gated audio signal
   expect(slowScopeSeconds(clocked, envNode)).toBe(1);
   expect(slowScopeSeconds(clocked, gateNode)).toBe(1);
   const gated = await engine.scope(clocked, envelope, 1);
-  expect(gated.gate?.slice(0, 25)).toEqual(Array(25).fill(true));
-  expect(gated.gate?.slice(25, 50)).toEqual(Array(25).fill(false));
+  expect(gated.gate).toEqual({ kind: "edges", start_open: true, transitions: [12_000, 24_000, 36_000] });
   expect(gated.bands[49]).toEqual([0, 0]);
+
+  const pulsed = setParam(reopened, gate, "frequency_hz", 2);
+  const narrow = await engine.scope(toGraph(setParam(pulsed, gate, "pulse_width", 0.005)), envelope, 1);
+  expect(narrow.gate).toEqual({ kind: "edges", start_open: true, transitions: [120, 24_000, 24_121] });
+  expect(narrow.bands[50]).toEqual([0, 0.25]);
+
+  const dense = await engine.scope(graph, envelope, 4);
+  expect(dense.gate).toEqual({ kind: "bands", states: Array(400).fill("mixed") });
+  expect(dense.bands).toEqual(Array(400).fill([0, 0.25]));
   const invalid = await engine.validate(toGraph(setParam(reopened, envelope, "sustain_level", 1.1)));
   expect(invalid).toContainEqual(expect.objectContaining({ code: "invalid_parameter", node: envelope, param: "sustain_level" }));
 

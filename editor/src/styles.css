@@ -343,4 +343,5 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
 .readouts div[hidden] { display: none; }
 .plot .scope-peak-band { fill: rgba(255, 180, 96, 0.14); stroke: var(--audio); stroke-width: 1.25; }
+.plot .scope-gate-mixed { fill: var(--control); opacity: 0.18; }
 .plot .scope-gate { fill: none; stroke: var(--control); stroke-width: 1.5; stroke-dasharray: 5 4; }

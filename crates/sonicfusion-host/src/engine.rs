@@ -4,8 +4,9 @@ use datafusion::execution::TaskContext;
 use futures::TryStreamExt;
 use sonicfusion::{ExecutionConfig, FrameDecoder, dsl::build_live_plan};
 use sonicfusion_graph_api::{
-    GraphIssue, GraphSpec, IssueCode, ModulationMapping, NodeId, NodeKind, PortRef, ScopeWindow,
-    SessionInfo, Severity, has_errors, upstream_of, validate, validate_upstream,
+    GateBand, GraphIssue, GraphSpec, IssueCode, ModulationMapping, NodeId, NodeKind, PortRef,
+    ScopeGate, ScopeWindow, SessionInfo, Severity, has_errors, upstream_of, validate,
+    validate_upstream,
 };
 
 use crate::lower::{Lowered, lower};
@@ -21,6 +22,7 @@ const MAX_PROBE_FRAMES: usize = 1 << 16;
 const MAX_SCOPE_SECONDS: f64 = 4.0;
 const MAX_SCOPE_FRAMES: usize = 4 * 192_000;
 const SCOPE_COLUMNS: usize = 1_000;
+const MAX_SCOPE_GATE_TRANSITIONS: usize = 1_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
@@ -213,12 +215,7 @@ impl Engine {
                     .collect();
                 let gate = if let Some(gate) = gate {
                     let samples = render_probe(gate, config, warmup, samples.len()).await?;
-                    Some(
-                        samples
-                            .chunks(bucket_frames)
-                            .map(|bucket| bucket[bucket.len() / 2] > 0.0)
-                            .collect(),
-                    )
+                    Some(scope_gate(&samples, bucket_frames))
                 } else {
                     None
                 };
@@ -390,6 +387,38 @@ fn cutoff_modulation(sample_rate_hz: u32) -> ModulationMapping {
     }
 }
 
+fn scope_gate(samples: &[f32], bucket_frames: usize) -> ScopeGate {
+    let transitions = samples
+        .windows(2)
+        .enumerate()
+        .filter(|(_, pair)| (pair[0] > 0.0) != (pair[1] > 0.0))
+        .map(|(index, _)| index + 1)
+        .take(MAX_SCOPE_GATE_TRANSITIONS + 1)
+        .collect::<Vec<_>>();
+    if transitions.len() <= MAX_SCOPE_GATE_TRANSITIONS {
+        return ScopeGate::Edges {
+            start_open: samples.first().is_some_and(|sample| *sample > 0.0),
+            transitions,
+        };
+    }
+
+    ScopeGate::Bands {
+        states: samples
+            .chunks(bucket_frames)
+            .map(|bucket| {
+                let open = bucket[0] > 0.0;
+                if bucket[1..].iter().any(|sample| (*sample > 0.0) != open) {
+                    GateBand::Mixed
+                } else if open {
+                    GateBand::Open
+                } else {
+                    GateBand::Closed
+                }
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,7 +554,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn slow_envelope_scope_aligns_gate_and_output_at_a_nonzero_origin() {
         let engine = Engine::new().unwrap();
-        let graph: GraphSpec = serde_json::from_value(serde_json::json!({
+        let mut graph: GraphSpec = serde_json::from_value(serde_json::json!({
             "version": 1,
             "nodes": [
                 {"id": "audio", "kind": "square", "params": {"frequency_hz": 0.0, "pulse_width": 1.0}},
@@ -547,14 +576,47 @@ mod tests {
             (scope.start_frame, scope.frames, scope.bucket_frames),
             (4_800, 48_000, 480)
         );
-        let gate = scope.gate.unwrap();
-        assert_eq!(gate.len(), 100);
-        assert_eq!(&gate[0..15], &[true; 15]);
-        assert_eq!(&gate[15..40], &[false; 25]);
-        assert_eq!(&gate[40..65], &[true; 25]);
-        for (band, open) in scope.bands.iter().zip(gate) {
+        assert_eq!(
+            scope.gate,
+            Some(ScopeGate::Edges {
+                start_open: true,
+                transitions: vec![7_200, 19_200, 31_200, 43_200],
+            })
+        );
+        assert_eq!(scope.bands.len(), 100);
+        for (index, band) in scope.bands.iter().enumerate() {
+            let open = index < 15 || (40..65).contains(&index) || index >= 90;
             assert_eq!(*band, if open { [0.7; 2] } else { [0.0; 2] });
         }
+
+        // Both ~2.5 ms pulses finish before the midpoint of their 10 ms bins.
+        graph.nodes[1].kind = NodeKind::Square {
+            frequency_hz: 2.0,
+            pulse_width: 0.005,
+        };
+        let narrow = engine.scope(&graph, &node, 4_800, 1.0).await.unwrap();
+        assert_eq!(
+            narrow.gate,
+            Some(ScopeGate::Edges {
+                start_open: false,
+                transitions: vec![19_200, 19_321, 43_200, 43_321],
+            })
+        );
+        assert_eq!(narrow.bands[40], [0.0, 0.7]);
+        assert_eq!(narrow.bands[90], [0.0, 0.7]);
+
+        graph.nodes[1].kind = NodeKind::Square {
+            frequency_hz: 2_400.0,
+            pulse_width: 0.05,
+        };
+        let dense = engine.scope(&graph, &node, 4_800, 4.0).await.unwrap();
+        assert_eq!(
+            dense.gate,
+            Some(ScopeGate::Bands {
+                states: vec![GateBand::Mixed; 400],
+            })
+        );
+        assert_eq!(dense.bands, vec![[0.0, 0.7]; 400]);
         assert!(engine.scope(&graph, &node, 0, 4.1).await.is_err());
     }
 

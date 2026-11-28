@@ -62,7 +62,9 @@ In the editor, connect audio to **in** and a slow square oscillator to
 values and DSL still accept any finite nonnegative duration, including zero.
 The slow scope shows two periods for a directly connected fixed-rate
 oscillator, within 250 ms to 4 s, and uses a 1 s window for other gates.
-The scope approximates live history with a bounded warm-up.
+The dashed gate marks transitions at their frame offsets. For dense gates,
+shading marks 10 ms intervals that contain both gate states. The scope
+approximates live history with a bounded warm-up.
 
 ## Direct playback
 

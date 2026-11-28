@@ -12,15 +12,25 @@ import type {
   ProbeWindow,
   RevisionEvent,
   RevisionUpdate,
+  ScopeGate,
   ScopeWindow,
   SessionInfo,
 } from "./types";
+
+const MAX_SCOPE_GATE_TRANSITIONS = 1_000;
 
 const INFO: SessionInfo = {
   sample_rate_hz: 48_000,
   batch_frames: 1024,
   cutoff_modulation: { base_hz: 1000, depth_hz: 900 },
 };
+
+export interface MockScopeRequest {
+  graph: GraphSpec;
+  node: string;
+  start: number;
+  seconds: number;
+}
 
 /**
  * A stand-in for the desktop host so the UI can be developed and tested in a
@@ -30,6 +40,10 @@ const INFO: SessionInfo = {
 export class MockEngine implements EngineClient {
   readonly label = "Mock engine";
   readonly live = false;
+
+  constructor(
+    private readonly renderScope: (request: MockScopeRequest) => ScopeWindow | Promise<ScopeWindow> = renderMockScope,
+  ) {}
 
   private revision = 0;
   private session = 0;
@@ -110,34 +124,8 @@ export class MockEngine implements EngineClient {
   }
 
   async scope(graph: GraphSpec, node: string, seconds: number): Promise<ScopeWindow> {
-    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 4) {
-      throw error("engine", "scope duration must be greater than 0 and at most 4 seconds");
-    }
-    const issues = upstreamIssues(graph, node);
-    if (issues.length > 0) throw error("invalid", `the graph has ${issues.length} error(s)`, issues);
     const start = this.playing ? this.frame() : 0;
-    const rate = INFO.sample_rate_hz;
-    const frames = Math.max(1, Math.round(seconds * rate));
-    const envelope = graph.nodes.find((candidate) => candidate.id === node)?.kind === "envelope";
-    const gateId = envelope ? envelopeGate(graph, node) : undefined;
-    const warmup = envelope ? Math.min(start, 2 * rate) : 0;
-    const samples = render(graph, node, start - warmup, warmup + frames).slice(warmup);
-    const gateSamples = gateId ? render(graph, gateId, start - warmup, warmup + frames).slice(warmup) : null;
-    const bucket = envelope ? Math.ceil(rate / 100) : Math.ceil(frames / 1000);
-    const bands: ScopeWindow["bands"] = [];
-    const gate: ScopeWindow["gate"] = gateSamples ? [] : null;
-    for (let begin = 0; begin < frames; begin += bucket) {
-      const end = Math.min(begin + bucket, frames);
-      let min = 1;
-      let max = -1;
-      for (let n = begin; n < end; n++) {
-        min = Math.min(min, samples[n]);
-        max = Math.max(max, samples[n]);
-      }
-      bands.push([min, max]);
-      if (gate && gateSamples) gate.push(gateSamples[Math.floor((begin + end) / 2)] > 0);
-    }
-    return { start_frame: start, sample_rate_hz: rate, frames, bucket_frames: bucket, bands, gate };
+    return this.renderScope({ graph, node, start, seconds });
   }
 
   async level(frames: number): Promise<LevelReading | null> {
@@ -168,6 +156,36 @@ export class MockEngine implements EngineClient {
   private frame() {
     return Math.floor(((performance.now() - this.startedAt) / 1000) * INFO.sample_rate_hz);
   }
+}
+
+/** The browser runs long windows in a worker. Unit tests use the same renderer directly. */
+export function renderMockScope({ graph, node, start, seconds }: MockScopeRequest): ScopeWindow {
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 4) {
+    throw error("engine", "scope duration must be greater than 0 and at most 4 seconds");
+  }
+  const issues = upstreamIssues(graph, node);
+  if (issues.length > 0) throw error("invalid", `the graph has ${issues.length} error(s)`, issues);
+  const rate = INFO.sample_rate_hz;
+  const frames = Math.max(1, Math.round(seconds * rate));
+  const envelope = graph.nodes.find((candidate) => candidate.id === node)?.kind === "envelope";
+  const gateId = envelope ? envelopeGate(graph, node) : undefined;
+  const warmup = envelope ? Math.min(start, 2 * rate) : 0;
+  const samples = render(graph, node, start - warmup, warmup + frames).slice(warmup);
+  const gateSamples = gateId ? render(graph, gateId, start - warmup, warmup + frames).slice(warmup) : null;
+  const bucket = envelope ? Math.ceil(rate / 100) : Math.ceil(frames / 1000);
+  const bands: ScopeWindow["bands"] = [];
+  for (let begin = 0; begin < frames; begin += bucket) {
+    const end = Math.min(begin + bucket, frames);
+    let min = 1;
+    let max = -1;
+    for (let n = begin; n < end; n++) {
+      min = Math.min(min, samples[n]);
+      max = Math.max(max, samples[n]);
+    }
+    bands.push([min, max]);
+  }
+  const gate = gateSamples && scopeGate(gateSamples, bucket);
+  return { start_frame: start, sample_rate_hz: rate, frames, bucket_frames: bucket, bands, gate };
 }
 
 function error(kind: CommandError["kind"], message: string, issues: GraphIssue[] = []): CommandError {
@@ -339,6 +357,35 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     return out;
   };
   return Array.from(signal(root));
+}
+
+function scopeGate(samples: readonly number[], bucket: number): ScopeGate {
+  const start_open = samples[0] > 0;
+  const transitions: number[] = [];
+  let open = start_open;
+  for (let i = 1; i < samples.length; i++) {
+    const nextOpen = samples[i] > 0;
+    if (open === nextOpen) continue;
+    open = nextOpen;
+    transitions.push(i);
+    if (transitions.length > MAX_SCOPE_GATE_TRANSITIONS) break;
+  }
+  if (transitions.length <= MAX_SCOPE_GATE_TRANSITIONS) return { kind: "edges", start_open, transitions };
+
+  const states: ("closed" | "open" | "mixed")[] = [];
+  for (let begin = 0; begin < samples.length; begin += bucket) {
+    const end = Math.min(begin + bucket, samples.length);
+    const firstOpen = samples[begin] > 0;
+    let state: (typeof states)[number] = firstOpen ? "open" : "closed";
+    for (let i = begin + 1; i < end; i++) {
+      if ((samples[i] > 0) !== firstOpen) {
+        state = "mixed";
+        break;
+      }
+    }
+    states.push(state);
+  }
+  return { kind: "bands", states };
 }
 
 function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSpec["params"]): Float32Array {

@@ -15,10 +15,29 @@ export function SlowScope({ scope }: { scope: ScopeWindow }) {
     `${index === 0 ? "M" : "L"}${x(center(index))} ${70 - peak * scale}`,
   ).join("");
   const lower = peaks.map((peak, index) => `L${x(center(index))} ${70 + peak * scale}`).reverse().join("");
-  const gatePath = gate?.map((open, index) => {
-    const y = open ? 8 : 132;
-    return `${index === 0 ? "M0 " : "V"}${y}H${x((index + 1) * bucket_frames)}`;
-  }).join("");
+  let gatePath = "";
+  let mixedPath = "";
+  if (gate?.kind === "edges") {
+    let open = gate.start_open;
+    gatePath = `M0 ${open ? 8 : 132}`;
+    for (const frame of gate.transitions) {
+      open = !open;
+      gatePath += `H${x(frame)}V${open ? 8 : 132}`;
+    }
+    gatePath += "H1000";
+  } else if (gate?.kind === "bands") {
+    // Dense gates can change several times in a bin. Shade the entire bin
+    // instead of suggesting that an edge occurred at a particular frame.
+    gate.states.forEach((state, index) => {
+      const start = x(index * bucket_frames);
+      const end = x((index + 1) * bucket_frames);
+      if (state === "mixed") {
+        mixedPath += `M${start} 8H${end}V132H${start}Z`;
+      } else {
+        gatePath += `M${start} ${state === "open" ? 8 : 132}H${end}`;
+      }
+    });
+  }
   const duration = formatSeconds(frames / scope.sample_rate_hz);
   return (
     <svg viewBox="0 0 1000 140" preserveAspectRatio="none" role="img"
@@ -27,6 +46,7 @@ export function SlowScope({ scope }: { scope: ScopeWindow }) {
       {gate ? (
         <>
           <path d={upper ? upper + lower + "Z" : ""} className="scope-peak-band" vectorEffect="non-scaling-stroke" />
+          {mixedPath && <path d={mixedPath} className="scope-gate-mixed" />}
           <path d={gatePath} className="scope-gate" vectorEffect="non-scaling-stroke" />
         </>
       ) : <path d={wave} className="trace" vectorEffect="non-scaling-stroke" />}

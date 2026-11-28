@@ -134,9 +134,14 @@ export interface ScopeWindow {
   bucket_frames: number;
   /** Minimum and maximum of each consecutive bin. */
   bands: [number, number][];
-  /** Gate state at each envelope bin's midpoint. */
-  gate: boolean[] | null;
+  gate: ScopeGate | null;
 }
+
+export type ScopeGate =
+  // State at frame 0, then frame offsets from this window's origin at which it flips.
+  | { kind: "edges"; start_open: boolean; transitions: number[] }
+  // Dense gates share audio peak bins and mark each bin containing both states.
+  | { kind: "bands"; states: ("closed" | "open" | "mixed")[] };
 
 export interface LevelReading {
   frame: number;

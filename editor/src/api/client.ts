@@ -1,3 +1,4 @@
+import { renderMockScopeInWorker } from "./mockScope";
 import type {
   GraphIssue,
   GraphSpec,
@@ -46,5 +47,5 @@ export async function connectEngine(): Promise<EngineClient> {
     return new TauriEngine();
   }
   const { MockEngine } = await import("./mock");
-  return new MockEngine();
+  return new MockEngine(typeof Worker === "undefined" ? undefined : renderMockScopeInWorker);
 }
