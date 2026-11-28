@@ -102,9 +102,12 @@ impl NodeKind {
             required: true,
         };
         match self {
-            Self::Sine { .. } | Self::Square { .. } | Self::Sawtooth { .. } | Self::Noise {} => {
-                Vec::new()
-            }
+            Self::Sine { .. } | Self::Square { .. } | Self::Noise {} => Vec::new(),
+            Self::Sawtooth { .. } => vec![InputPort {
+                name: "frequency".into(),
+                signal: Signal::Control,
+                required: false,
+            }],
             Self::Gain { .. } | Self::Output {} => vec![audio("in")],
             Self::LowPass { .. } => vec![
                 audio("in"),

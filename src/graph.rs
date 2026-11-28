@@ -31,7 +31,7 @@ pub(crate) enum PreparedCutoff {
 pub(crate) enum Node {
     Sine(f64),
     Square(f64, f64),
-    Sawtooth(f64),
+    Sawtooth(f64, Option<NodeId>),
     WhiteNoise(Option<u32>),
     Gain(NodeId, f32),
     LowPass(NodeId, PreparedCutoff),
@@ -54,7 +54,7 @@ impl GraphBuilder {
     /// Inputs must be IDs returned by previous calls on this builder.
     pub(crate) fn add(&mut self, node: Node) -> Result<NodeId> {
         match &node {
-            Node::Sine(hz) | Node::Sawtooth(hz) => {
+            Node::Sine(hz) | Node::Sawtooth(hz, _) => {
                 validate_frequency(*hz, self.sample_rate_hz, "frequency_hz")?;
             }
             Node::Square(hz, width) => {
@@ -110,7 +110,14 @@ impl PreparedGraph {
                 Node::Square(hz, width) => {
                     Arc::new(FrameSquareOscExec::try_new(config, hz, width)?)
                 }
-                Node::Sawtooth(hz) => Arc::new(FrameSawToothOscExec::try_new(config, hz)?),
+                Node::Sawtooth(hz, modulation) => Arc::new(match modulation {
+                    None => FrameSawToothOscExec::try_new(config, hz)?,
+                    Some(id) => FrameSawToothOscExec::try_new_modulated(
+                        config,
+                        hz,
+                        FramePlan::try_from_plan(config, input(id))?,
+                    )?,
+                }),
                 Node::WhiteNoise(seed) => Arc::new(FrameWhiteNoiseExec::new(
                     config,
                     seed.unwrap_or(index as u32),

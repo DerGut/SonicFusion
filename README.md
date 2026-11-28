@@ -33,6 +33,23 @@ Nyquist, and zero holds -1. The Rust API is
 `FrameSawToothOscExec::try_new(&config, frequency_hz)` in `physical::frame`.
 Like the square oscillator, the sawtooth is not band-limited.
 
+The Sawtooth editor node's optional FM port maps a normalized control sample
+`m` to `base_frequency * 2^m`, capped just below Nyquist. The base-frequency
+control stays editable. A control of -1 moves down one octave, 0 leaves the
+frequency at its base, and +1 moves up one octave. Zero base frequency stays
+at zero. For example:
+
+```text
+sine(3) -> $lfo;
+sawtooth(220, $lfo) -> gain(0.1) -> out
+```
+
+The oscillator emits the current phase, then advances by that frame's
+frequency and wraps. Phase carries across render batches. A new execution
+starts from the base frequency's phase at the execution's first frame. An
+offline probe starting later approximates the live phase because it has only
+a bounded window of control history.
+
 The Noise node and `noise()` generate mono white noise in [-1, 1]. Output is
 deterministic per source and absolute frame, independent of render batch size.
 An optional unsigned 32-bit seed, `noise(seed)`, fixes a particular sequence.

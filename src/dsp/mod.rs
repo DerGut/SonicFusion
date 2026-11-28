@@ -1,3 +1,5 @@
+mod modulation;
+pub(crate) use modulation::ModulatedPhase;
 mod sawtooth;
 pub(crate) use sawtooth::sawtooth_at_frame;
 mod sine;

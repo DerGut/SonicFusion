@@ -76,7 +76,7 @@ export function WireDropMenu({ x, y, from, doc, catalog, onPick, onClose }: {
         ))}
       </ul>
       <p className="drop-menu-foot">
-        {from ? "Sources are hidden: they have no input." : "↑↓ choose · ↵ add · Esc close"}
+        {from ? "Only nodes with inputs are shown." : "↑↓ choose · ↵ add · Esc close"}
       </p>
     </div>
   );

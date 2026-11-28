@@ -71,7 +71,10 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
                 frequency_hz,
                 pulse_width,
             } => format!("square({}, {})", num(*frequency_hz), num(*pulse_width)),
-            NodeKind::Sawtooth { frequency_hz } => format!("sawtooth({})", num(*frequency_hz)),
+            NodeKind::Sawtooth { frequency_hz } => match wired(id, "frequency") {
+                None => format!("sawtooth({})", num(*frequency_hz)),
+                Some(control) => format!("sawtooth({}, {})", num(*frequency_hz), var(control)),
+            },
             NodeKind::Noise {} => format!("noise({})", seeds[id]),
             NodeKind::Gain { factor } => {
                 format!(
