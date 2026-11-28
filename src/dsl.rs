@@ -9,7 +9,7 @@ use datafusion::physical_plan::limit::GlobalLimitExec;
 use crate::{
     ExecutionConfig, RenderConfig,
     graph::{GraphBuilder, Node, NodeId, Plan, PreparedCutoff, PreparedGraph},
-    physical::frame::Adsr,
+    physical::frame::{Adsr, SEQUENCER_STEPS, StepPattern},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -257,6 +257,51 @@ fn prepare_node(
         "mix" => {
             let (inputs, gains) = mix_args(source, at, bindings, incoming, args)?;
             Ok(Node::Mix(inputs, gains))
+        }
+        "sequencer" => {
+            if incoming.is_some() {
+                return Err(bad("sequencer is a source and takes no input".into()));
+            }
+            let usage = || {
+                bad(format!(
+                    "sequencer expects [{SEQUENCER_STEPS} steps of 0 or 1], a tempo in BPM, a gate length, and an optional clock"
+                ))
+            };
+            let (steps, numbers, clock) = match args {
+                [Arg::List(steps), Arg::Number(tempo), Arg::Number(gate)] => {
+                    (steps, [*tempo, *gate], None)
+                }
+                [
+                    Arg::List(steps),
+                    Arg::Number(tempo),
+                    Arg::Number(gate),
+                    Arg::Ref(clock),
+                ] => (
+                    steps,
+                    [*tempo, *gate],
+                    Some(reference(source, at, bindings, clock)?),
+                ),
+                _ => return Err(usage()),
+            };
+            if steps.len() != SEQUENCER_STEPS {
+                return Err(usage());
+            }
+            let mut pattern = [false; SEQUENCER_STEPS];
+            for (step, arg) in pattern.iter_mut().zip(steps) {
+                *step = match arg {
+                    Arg::Number(value) if *value == 0.0 => false,
+                    Arg::Number(value) if *value == 1.0 => true,
+                    _ => return Err(usage()),
+                };
+            }
+            Ok(Node::Sequencer(
+                StepPattern {
+                    steps: pattern,
+                    tempo_bpm: numbers[0],
+                    gate_length: numbers[1],
+                },
+                clock,
+            ))
         }
         _ => Err(bad(format!("unknown node {name:?}"))),
     }

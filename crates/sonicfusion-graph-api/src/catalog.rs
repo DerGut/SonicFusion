@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{NodeKind, Signal};
+use crate::{NodeKind, SEQUENCER_STEPS, Signal};
 
 /// Describes every node kind so frontends render from one vocabulary instead
 /// of keeping their own copy. Ranges are editing ranges for controls; hard
@@ -51,6 +51,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             signature: "constant(value)".into(),
             inputs: Vec::new(),
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: vec![ParamDescriptor {
                 min: -1.0,
@@ -69,6 +70,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
                 required: false,
             }],
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: vec![hz(
                 "frequency_hz",
@@ -85,6 +87,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             signature: "square(freq, pw)".into(),
             inputs: Vec::new(),
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: vec![
                 hz(
@@ -109,6 +112,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
                 required: false,
             }],
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: vec![hz(
                 "frequency_hz",
@@ -125,6 +129,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             signature: "noise()".into(),
             inputs: Vec::new(),
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: Vec::new(),
         },
@@ -143,6 +148,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
                 },
             ],
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: vec![
                 hz("cutoff_hz", "Cutoff", 1_200.0, 20.0, FrequencyParam::Cutoff),
@@ -159,6 +165,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             signature: "gain(factor)".into(),
             inputs: vec![audio_in("in", "in")],
             variadic_input: None,
+            pattern: None,
             has_output: true,
             // Gain is a multiplier: below unity attenuates, above amplifies.
             // This is an editing range; validation accepts any finite f32.
@@ -179,6 +186,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
                 min: 1,
                 default: 2,
             }),
+            pattern: None,
             has_output: true,
             params: Vec::new(),
         },
@@ -197,6 +205,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
                 },
             ],
             variadic_input: None,
+            pattern: None,
             has_output: true,
             params: vec![
                 seconds("attack_seconds", "Attack", 0.01),
@@ -206,12 +215,53 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             ],
         },
         NodeDescriptor {
+            kind: "sequencer".into(),
+            label: "Sequencer".into(),
+            category: Category::Source,
+            signature: "sequencer(steps, bpm, gate)".into(),
+            inputs: vec![PortDescriptor {
+                name: "clock".into(),
+                label: "Clock".into(),
+                signal: Signal::Control,
+                required: false,
+            }],
+            variadic_input: None,
+            pattern: Some(PatternParam {
+                name: "steps".into(),
+                label: "Pattern".into(),
+                length: SEQUENCER_STEPS,
+                // Quarter notes, so a new sequencer is audible straight away.
+                default: (0..SEQUENCER_STEPS)
+                    .map(|step| if step % 4 == 0 { 1.0 } else { 0.0 })
+                    .collect(),
+            }),
+            has_output: true,
+            params: vec![
+                ParamDescriptor {
+                    name: "tempo_bpm".into(),
+                    label: "Tempo".into(),
+                    unit: Some("BPM".into()),
+                    min: 20.0,
+                    max: 300.0,
+                    default: 120.0,
+                    scale: Scale::Linear,
+                    frequency: None,
+                },
+                ParamDescriptor {
+                    unit: Some("%".into()),
+                    min: 0.05,
+                    ..ratio("gate_length", "Gate length", 0.5)
+                },
+            ],
+        },
+        NodeDescriptor {
             kind: "output".into(),
             label: "Output".into(),
             category: Category::Output,
             signature: "out".into(),
             inputs: vec![audio_in("in", "in")],
             variadic_input: None,
+            pattern: None,
             has_output: false,
             params: Vec::new(),
         },
@@ -262,6 +312,11 @@ pub fn default_kind(kind: &str) -> Option<NodeKind> {
             sustain_level: param("sustain_level")?,
             release_seconds: param("release_seconds")?,
         },
+        "sequencer" => NodeKind::Sequencer {
+            steps: descriptor.pattern.as_ref()?.default.clone(),
+            tempo_bpm: param("tempo_bpm")?,
+            gate_length: param("gate_length")?,
+        },
         "output" => NodeKind::Output {},
         _ => return None,
     })
@@ -277,6 +332,9 @@ pub struct NodeDescriptor {
     pub inputs: Vec<PortDescriptor>,
     /// Inputs added by the user, such as mix channels, each with a weight.
     pub variadic_input: Option<VariadicInput>,
+    /// A fixed-length list param edited as a step pattern, such as a sequencer's steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<PatternParam>,
     pub has_output: bool,
     pub params: Vec<ParamDescriptor>,
 }
@@ -305,6 +363,15 @@ pub struct VariadicInput {
     pub weight: ParamDescriptor,
     pub min: usize,
     pub default: usize,
+}
+
+/// A list param of `length` entries, each 0 (off) or 1 (on).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatternParam {
+    pub name: String,
+    pub label: String,
+    pub length: usize,
+    pub default: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -11,6 +11,8 @@ import { OutputMeter } from "./OutputMeter";
 import { ParamControl } from "./ParamControl";
 import { FrequencyControl } from "./FrequencyControl";
 import { ConstantReadout } from "./ConstantReadout";
+import { PatternStrip } from "./PatternEditor";
+import { activeSteps, readSteps } from "../model/pattern";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const { node, descriptor, ports, sources, issues, actions, session } = data;
@@ -96,7 +98,49 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     );
   }
 
-  if (!gate) descriptor.params.forEach((param) => {
+  const pattern = descriptor.pattern;
+  if (pattern) {
+    // Clock (with its port), pattern strip, gate length. The pattern itself is
+    // edited in the probe panel's Pattern tab, which opens with the node selected.
+    const clock = ports.find((port) => port.name === "clock");
+    const clockSource = clock ? sources[clock.name] : undefined;
+    const steps = readSteps(node.params[pattern.name], pattern.length);
+    const control = (name: string, round = false) => {
+      const param = descriptor.params.find((candidate) => candidate.name === name)!;
+      return (
+        <ParamControl key={name} id={`${node.id}-${name}`} descriptor={param}
+          value={Number(node.params[name] ?? param.default)} invalid={paramIssue(name)}
+          onBeginContinuous={actions.beginContinuous}
+          onChange={(value, continuous) => actions.setParam(node.id, name, round && continuous ? Math.round(value) : value, continuous)} />
+      );
+    };
+    if (clock) handles.push(inputHandle(clock, rowPortTop(rows.length)));
+    rows.push(
+      clockSource ? (
+        <div key="clock" className="param modulated sequencer-clock">
+          <div className="param-top">
+            <span>{clock!.label}</span>
+            <span className="value" title="Each rising edge of the clock advances one step">1 step per edge</span>
+          </div>
+          <p className="param-note" title={`from ${clockSource.label}; the internal tempo is unused while the clock is connected`}>
+            from {clockSource.label} · tempo unused
+          </p>
+        </div>
+      ) : control("tempo_bpm", true),
+      <div key={pattern.name} className={`param sequencer-pattern${paramIssue(pattern.name) ? " invalid" : ""}`} title={paramIssue(pattern.name)}>
+        <div className="param-top">
+          <span>{pattern.label}</span>
+          <span className="value" title="Select the node to edit the pattern in the panel below">
+            {activeSteps(steps)} of {pattern.length} · edit
+          </span>
+        </div>
+        <PatternStrip steps={steps} />
+      </div>,
+      control("gate_length"),
+    );
+  }
+
+  if (!gate && !pattern) descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
     const isCutoff = param.frequency === "cutoff";

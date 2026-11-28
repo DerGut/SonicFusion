@@ -552,6 +552,50 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn sequencer_probe_follows_the_absolute_grid_and_reports_invalid_settings() {
+        let engine = Engine::new().unwrap();
+        let rate = engine.info().sample_rate_hz;
+        let mut graph: GraphSpec = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {"id": "seq", "kind": "sequencer", "params": {
+                    "steps": [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    "tempo_bpm": 120.0, "gate_length": 0.5
+                }},
+                {"id": "out", "kind": "output", "params": {}}
+            ],
+            "wires": [{"from": "seq", "to": {"node": "out", "port": "in"}}]
+        }))
+        .unwrap();
+        let out = NodeId::new("out");
+        // 120 BPM is eight 16th steps per second. Step 2 starts a quarter second in.
+        let step = rate as usize / 8;
+        let probe = engine
+            .probe(&graph, &out, (2 * step) as u64, step)
+            .await
+            .unwrap();
+        assert!(probe[..step / 2].iter().all(|&sample| sample == 1.0));
+        assert!(probe[step / 2 + 1..].iter().all(|&sample| sample == 0.0));
+        let probe = engine.probe(&graph, &out, step as u64, step).await.unwrap();
+        assert!(probe.iter().all(|&sample| sample == 0.0));
+
+        graph.nodes[0].kind = NodeKind::Sequencer {
+            steps: vec![1.0, 0.5],
+            tempo_bpm: 0.0,
+            gate_length: 1.5,
+        };
+        let issues = engine.validate(&graph);
+        for param in ["steps", "tempo_bpm", "gate_length"] {
+            assert!(
+                issues
+                    .iter()
+                    .any(|issue| issue.param.as_deref() == Some(param)),
+                "{param}: {issues:?}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn slow_envelope_scope_aligns_gate_and_output_at_a_nonzero_origin() {
         let engine = Engine::new().unwrap();
         let mut graph: GraphSpec = serde_json::from_value(serde_json::json!({

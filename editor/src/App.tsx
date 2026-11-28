@@ -289,10 +289,16 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
               client={client}
               graph={graph}
               node={selectedNode}
+              pattern={catalog.get(selectedNode.kind)?.pattern}
               playing={playing}
               draft={engine.dirty}
               session={session}
               onRename={actions.renameNode}
+              onPattern={(steps, continuous) => {
+                const name = catalog.get(selectedNode.kind)?.pattern?.name;
+                if (name) actions.setParam(selectedNode.id, name, steps, continuous);
+              }}
+              onBeginContinuous={actions.beginContinuous}
               onClose={() => setSelected(new Set())}
             />
           )}

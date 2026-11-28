@@ -15,11 +15,12 @@ mod status;
 mod validate;
 
 pub use catalog::{
-    Category, FrequencyParam, NodeDescriptor, ParamDescriptor, PortDescriptor, Scale,
+    Category, FrequencyParam, NodeDescriptor, ParamDescriptor, PatternParam, PortDescriptor, Scale,
     VariadicInput, catalog, default_kind,
 };
 pub use spec::{
-    GRAPH_VERSION, GraphSpec, InputPort, NodeId, NodeKind, NodeSpec, PortRef, Signal, Wire,
+    GRAPH_VERSION, GraphSpec, InputPort, NodeId, NodeKind, NodeSpec, PortRef, SEQUENCER_STEPS,
+    Signal, Wire,
 };
 pub use status::{
     GateBand, LevelReading, ModulationMapping, ProbeWindow, RevisionStatus, RevisionUpdate,
