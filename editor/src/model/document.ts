@@ -7,6 +7,7 @@ import type {
   PortRef,
   Wire,
 } from "../api/types";
+import type { FrequencyMode } from "./pitch";
 
 export interface Position {
   x: number;
@@ -17,6 +18,7 @@ export interface DocNode {
   id: string;
   kind: NodeKind;
   params: Record<string, ParamValue>;
+  frequencyMode?: FrequencyMode;
   position: Position;
   displayName?: string;
 }
@@ -210,12 +212,23 @@ export function renameNode(doc: EditorDocument, id: string, name: string): Edito
 }
 
 export function setParam(doc: EditorDocument, id: string, name: string, value: ParamValue): EditorDocument {
+  const node = doc.nodes.find((candidate) => candidate.id === id);
+  if (!node || node.params[name] === value) return doc;
   return {
     ...doc,
-    nodes: doc.nodes.map((node) =>
-      node.id === id ? { ...node, params: { ...node.params, [name]: value } } : node,
+    nodes: doc.nodes.map((candidate) =>
+      candidate === node ? { ...node, params: { ...node.params, [name]: value } } : candidate,
     ),
   };
+}
+
+export function setFrequencyMode(doc: EditorDocument, id: string, mode?: FrequencyMode): EditorDocument {
+  const node = doc.nodes.find((candidate) => candidate.id === id);
+  if (!node || node.frequencyMode === mode) return doc;
+  const next = { ...node };
+  if (mode) next.frequencyMode = mode;
+  else delete next.frequencyMode;
+  return { ...doc, nodes: doc.nodes.map((candidate) => candidate === node ? next : candidate) };
 }
 
 /** Append a mix input with `weight`. */
@@ -270,7 +283,8 @@ export function parseDocument(text: string): EditorDocument {
       typeof position?.x !== "number" ||
       typeof position?.y !== "number" ||
       !Number.isFinite(position.x) ||
-      !Number.isFinite(position.y)
+      !Number.isFinite(position.y) ||
+      (candidate.frequencyMode !== undefined && candidate.frequencyMode !== "hz" && candidate.frequencyMode !== "note")
     ) {
       throw new Error("project has a malformed node");
     }

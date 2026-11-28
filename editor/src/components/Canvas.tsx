@@ -74,11 +74,15 @@ export function Canvas(props: Props) {
     const sourcesByNode = new Map<string, SfNodeData["sources"]>();
     const labelsById = new Map(doc.nodes.map((node) => [node.id, nodeLabel(node)]));
     const outgoingByNode = new Map<string, string[]>();
+    const portsByNode = new Map(doc.nodes.map((node) => [node.id, inputPorts(node, catalog)]));
+    const controlSources = new Set<string>();
     for (const wire of doc.wires) {
       const sources = sourcesByNode.get(wire.to.node) ?? {};
       sources[wire.to.port] = { id: wire.from, label: labelsById.get(wire.from) ?? wire.from };
       sourcesByNode.set(wire.to.node, sources);
       outgoingByNode.set(wire.from, [...(outgoingByNode.get(wire.from) ?? []), wireId(wire)]);
+      const port = portsByNode.get(wire.to.node)?.find((candidate) => candidate.name === wire.to.port);
+      if (port?.signal === "control") controlSources.add(wire.from);
     }
     {
       const old = new Map(nodesRef.current.map((node) => [node.id, node]));
@@ -89,9 +93,10 @@ export function Canvas(props: Props) {
         const data: SfNodeData = {
           node,
           descriptor,
-          ports: inputPorts(node, catalog),
+          ports: portsByNode.get(node.id) ?? [],
           sources: sourcesByNode.get(node.id) ?? {},
           outgoing: outgoingByNode.get(node.id) ?? [],
+          feedsControl: controlSources.has(node.id),
           issues: issues.filter((issue) => issue.node === node.id),
           session,
           ceilingDb,
@@ -151,7 +156,7 @@ export function Canvas(props: Props) {
       if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (target instanceof Element && target !== document.body && !canvas.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("input, textarea, button, [role='menu']")) return;
+      if (target instanceof Element && target.closest("input, textarea, select, button, [role='menu']")) return;
       event.preventDefault();
       const box = canvas.current?.getBoundingClientRect();
       const inside = box && pointer.current.x >= box.left && pointer.current.x <= box.right
@@ -289,6 +294,7 @@ function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
     a.session === b.session &&
     a.ceilingDb === b.ceilingDb &&
     a.actions === b.actions &&
+    a.feedsControl === b.feedsControl &&
     JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
     JSON.stringify(a.sources) === JSON.stringify(b.sources) &&
     JSON.stringify(a.outgoing) === JSON.stringify(b.outgoing) &&

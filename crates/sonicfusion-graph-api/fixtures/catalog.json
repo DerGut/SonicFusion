@@ -15,7 +15,8 @@
         "min": 0.01,
         "max": 20000.0,
         "default": 220.0,
-        "scale": "log"
+        "scale": "log",
+        "frequency": "pitch"
       }
     ]
   },
@@ -35,7 +36,8 @@
         "min": 0.01,
         "max": 20000.0,
         "default": 110.0,
-        "scale": "log"
+        "scale": "log",
+        "frequency": "pitch"
       },
       {
         "name": "pulse_width",
@@ -64,7 +66,8 @@
         "min": 0.01,
         "max": 20000.0,
         "default": 220.0,
-        "scale": "log"
+        "scale": "log",
+        "frequency": "pitch"
       }
     ]
   },
@@ -97,7 +100,8 @@
         "min": 20.0,
         "max": 20000.0,
         "default": 1200.0,
-        "scale": "log"
+        "scale": "log",
+        "frequency": "cutoff"
       }
     ]
   },

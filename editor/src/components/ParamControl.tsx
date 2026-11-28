@@ -2,21 +2,20 @@ import { useState } from "react";
 
 import type { ParamDescriptor } from "../api/types";
 import { formatHz } from "../model/signal";
+import { ParameterRange } from "./ParameterRange";
 
-const STEPS = 1000;
-/** Keys that move a range input's value. */
-const VALUE_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
+export const SLIDER_STEPS = 1000;
 
 export function toSlider(descriptor: ParamDescriptor, value: number): number {
   const { min, max, scale } = descriptor;
   const clamped = Math.min(max, Math.max(min, value));
   const fraction = scale === "log" ? Math.log(clamped / min) / Math.log(max / min) : (clamped - min) / (max - min);
-  return fraction * STEPS;
+  return fraction * SLIDER_STEPS;
 }
 
 export function fromSlider(descriptor: ParamDescriptor, position: number): number {
   const { min, max, scale } = descriptor;
-  const fraction = position / STEPS;
+  const fraction = position / SLIDER_STEPS;
   const value = scale === "log" ? min * Math.pow(max / min, fraction) : min + (max - min) * fraction;
   return Number(value.toPrecision(4));
 }
@@ -41,10 +40,9 @@ interface Props {
 export function ParamControl({ id, descriptor, label, value, invalid, onChange, onBeginContinuous }: Props) {
   const [typing, setTyping] = useState<string | null>(null);
   const position = toSlider(descriptor, value);
-  const fill = `linear-gradient(90deg, var(--fill) 0 ${position / 10}%, var(--track) ${position / 10}% 100%)`;
   const commit = () => {
     const parsed = Number(typing);
-    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed)) onChange(parsed, false);
+    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
     setTyping(null);
   };
   return (
@@ -67,12 +65,9 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
             }} />
         )}
       </div>
-      <input id={id} className="range nodrag" type="range" min={0} max={STEPS} step="any"
-        value={position} style={{ background: fill }}
-        aria-valuetext={formatValue(descriptor, value)}
-        onPointerDown={onBeginContinuous}
-        onKeyDown={(event) => VALUE_KEYS.has(event.key) && onBeginContinuous()}
-        onChange={(event) => onChange(fromSlider(descriptor, Number(event.target.value)), true)} />
+      <ParameterRange id={id} min={0} max={SLIDER_STEPS} step="any" position={position}
+        valueText={formatValue(descriptor, value)} onBeginContinuous={onBeginContinuous}
+        onMove={(position) => onChange(fromSlider(descriptor, position), true)} />
     </div>
   );
 }

@@ -28,6 +28,7 @@ import {
   removeNodes,
   renameNode,
   setParam,
+  setFrequencyMode,
   studioDocument,
   toGraph,
   wireId,
@@ -171,6 +172,7 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
       renameNode: (id, name) => edit((current) => renameNode(current, id, name)),
       setParam: (id: string, name: string, value: ParamValue, continuous: boolean) =>
         edit((current) => setParam(current, id, name, value), !continuous),
+      setFrequencyMode: (id, mode) => edit((current) => setFrequencyMode(current, id, mode)),
       beginContinuous: () => dispatch({ type: "checkpoint" }),
       addMixInput: (id: string) =>
         edit((current) => addMixInput(current, id, catalog.get("mix")?.variadic_input?.weight.default ?? 0.5)),

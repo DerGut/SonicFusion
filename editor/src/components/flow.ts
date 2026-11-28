@@ -11,6 +11,7 @@ import type {
   Signal,
 } from "../api/types";
 import type { DocNode } from "../model/document";
+import type { FrequencyMode } from "../model/pitch";
 
 /** Fixed row metrics, so port handles line up with their rows. */
 export const HEADER_HEIGHT = 34;
@@ -45,6 +46,7 @@ export function pickUpWire(event: React.PointerEvent | React.MouseEvent, wireId:
 export interface NodeActions {
   renameNode(id: string, name: string): void;
   setParam(id: string, name: string, value: ParamValue, continuous: boolean): void;
+  setFrequencyMode(id: string, mode?: FrequencyMode): void;
   beginContinuous(): void;
   addMixInput(id: string): void;
   removeMixInput(id: string): void;
@@ -59,6 +61,7 @@ export interface SfNodeData extends Record<string, unknown> {
   sources: Record<string, { id: string; label: string }>;
   /** Ids of the wires leaving this node, oldest first. */
   outgoing: string[];
+  feedsControl: boolean;
   issues: GraphIssue[];
   session: SessionInfo;
   ceilingDb: number;

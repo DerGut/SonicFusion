@@ -19,6 +19,8 @@ import {
   renameNode,
   studioDocument,
   toGraph,
+  setFrequencyMode,
+  setParam,
   wouldCycle,
 } from "./document";
 
@@ -132,5 +134,19 @@ describe("document", () => {
     expect(() => parseDocument(JSON.stringify(damaged))).toThrow("malformed node");
     const unknown = { ...studio(), wires: [{ from: "a" }] };
     expect(() => parseDocument(JSON.stringify(unknown))).toThrow("malformed wire");
+  });
+
+  it("round-trips a frequency display override only in the editor document", () => {
+    const doc = studio();
+    const changed = setFrequencyMode(doc, "osc_a", "hz");
+    expect(toGraph(changed)).toEqual(toGraph(doc));
+    const restored = parseDocument(JSON.stringify(changed));
+    expect(restored.nodes.find((node) => node.id === "osc_a")?.frequencyMode).toBe("hz");
+    expect(setFrequencyMode(restored, "osc_a")).toEqual(doc);
+  });
+
+  it("does not write a parameter when its value is already set", () => {
+    const doc = studio();
+    expect(setParam(doc, "osc_a", "frequency_hz", 220)).toBe(doc);
   });
 });

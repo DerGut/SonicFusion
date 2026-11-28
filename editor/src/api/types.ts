@@ -51,6 +51,7 @@ export interface ParamDescriptor {
   max: number;
   default: number;
   scale: "linear" | "log";
+  frequency?: "pitch" | "cutoff";
 }
 
 export interface VariadicInput {

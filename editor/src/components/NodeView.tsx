@@ -2,13 +2,14 @@ import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { memo } from "react";
 
 import type { PortDescriptor } from "../api/types";
-import { formatHz } from "../model/signal";
 import { wireId } from "../model/document";
+import { formatHz } from "../model/signal";
 import { IO_PORT_TOP, type SfNode, pickUpWire, rowPortTop } from "./flow";
 import { KindIcon } from "./icons";
 import { NodeTitle } from "./NodeTitle";
 import { OutputMeter } from "./OutputMeter";
 import { ParamControl } from "./ParamControl";
+import { FrequencyControl } from "./FrequencyControl";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const { node, descriptor, ports, sources, issues, actions, session } = data;
@@ -70,14 +71,16 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
-    const modulated = node.kind === "low_pass" && control && sources[control.name];
+    const isCutoff = param.frequency === "cutoff";
+    const modulated = isCutoff && control && sources[control.name];
     if (modulated) {
       const { base_hz, depth_hz } = session.cutoff_modulation;
+      const readout = formatHz(base_hz) + " ± " + Math.round(depth_hz) + " Hz";
       rows.push(
         <div key={param.name} className="param modulated">
           <div className="param-top">
             <span>{param.label}</span>
-            <span className="value">{formatHz(base_hz)} ± {Math.round(depth_hz)} Hz</span>
+            <span className="value">{readout}</span>
           </div>
           <p className="param-note" title={`from ${modulated.label} · fixed engine mapping`}>
             from {modulated.label} · fixed engine mapping
@@ -85,14 +88,21 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
         </div>,
       );
     } else {
-      rows.push(
-        <ParamControl key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
-          value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
-          onBeginContinuous={actions.beginContinuous}
-          onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
-      );
+      const props = {
+        id: `${node.id}-${param.name}`,
+        descriptor: param,
+        value: Number(node.params[param.name]),
+        invalid: paramIssue(param.name),
+        onBeginContinuous: actions.beginContinuous,
+        onChange: (value: number, continuous: boolean) => actions.setParam(node.id, param.name, value, continuous),
+      };
+      rows.push(param.frequency ? (
+        <FrequencyControl key={param.name} {...props} sampleRate={session.sample_rate_hz}
+          feedsControl={data.feedsControl} override={node.frequencyMode}
+          onOverride={(mode) => actions.setFrequencyMode(node.id, mode)} />
+      ) : <ParamControl key={param.name} {...props} />);
     }
-    if (param.name === "cutoff_hz" && control) handles.push(inputHandle(control, rowPortTop(index)));
+    if (isCutoff && control) handles.push(inputHandle(control, rowPortTop(index)));
   });
 
   return (
