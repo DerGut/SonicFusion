@@ -11,8 +11,8 @@ use crate::{
     ExecutionConfig,
     physical::frame::{
         Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
-        FrameSquareOscExec, FrameWhiteNoiseExec, low_pass, validate_constant_cutoff,
-        validate_frequency, validate_pulse_width,
+        FrameSquareOscExec, FrameWhiteNoiseExec, low_pass_with_mix, validate_constant_cutoff,
+        validate_frequency, validate_low_pass_mix, validate_pulse_width,
     },
 };
 
@@ -34,7 +34,7 @@ pub(crate) enum Node {
     Sawtooth(f64, Option<NodeId>),
     WhiteNoise(Option<u32>),
     Gain(NodeId, f32),
-    LowPass(NodeId, PreparedCutoff),
+    LowPass(NodeId, PreparedCutoff, f64),
     Mix(Vec<NodeId>, Vec<f32>),
 }
 
@@ -64,8 +64,11 @@ impl GraphBuilder {
             Node::Gain(_, gain) if !gain.is_finite() => {
                 return Err(DataFusionError::Plan("gain must be finite".into()));
             }
-            Node::LowPass(_, PreparedCutoff::ConstantHz(hz)) => {
-                validate_constant_cutoff(*hz, self.sample_rate_hz)?;
+            Node::LowPass(_, cutoff, mix) => {
+                if let PreparedCutoff::ConstantHz(hz) = cutoff {
+                    validate_constant_cutoff(*hz, self.sample_rate_hz)?;
+                }
+                validate_low_pass_mix(*mix)?;
             }
             Node::Mix(inputs, gains)
                 if inputs.is_empty()
@@ -125,15 +128,20 @@ impl PreparedGraph {
                 Node::Gain(id, factor) => {
                     Arc::new(FrameGainExec::try_new(config, input(id), factor)?)
                 }
-                Node::LowPass(id, cutoff) => {
+                Node::LowPass(id, cutoff, mix) => {
                     let cutoff = match cutoff {
                         PreparedCutoff::ConstantHz(hz) => Cutoff::ConstantHz(hz),
                         PreparedCutoff::Modulated(id) => Cutoff::Modulated {
                             cutoff: FramePlan::try_from_plan(config, input(id))?,
                         },
                     };
-                    low_pass(config, FramePlan::try_from_plan(config, input(id))?, cutoff)?
-                        .into_plan()
+                    low_pass_with_mix(
+                        config,
+                        FramePlan::try_from_plan(config, input(id))?,
+                        cutoff,
+                        mix,
+                    )?
+                    .into_plan()
                 }
                 Node::Mix(ids, gains) => Arc::new(FrameMixExec::try_new(
                     config,

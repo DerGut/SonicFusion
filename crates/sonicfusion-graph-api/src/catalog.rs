@@ -104,7 +104,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             kind: "low_pass".into(),
             label: "Low-pass".into(),
             category: Category::Filter,
-            signature: "lpf(cutoff)".into(),
+            signature: "lpf(cutoff, wet?)".into(),
             inputs: vec![
                 audio_in("in", "in"),
                 PortDescriptor {
@@ -116,13 +116,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             ],
             variadic_input: None,
             has_output: true,
-            params: vec![hz(
-                "cutoff_hz",
-                "Cutoff",
-                1_200.0,
-                20.0,
-                FrequencyParam::Cutoff,
-            )],
+            params: vec![
+                hz("cutoff_hz", "Cutoff", 1_200.0, 20.0, FrequencyParam::Cutoff),
+                ParamDescriptor {
+                    unit: Some("%".into()),
+                    ..ratio("wet", "Dry/Wet", 1.0)
+                },
+            ],
         },
         NodeDescriptor {
             kind: "gain".into(),
@@ -186,6 +186,7 @@ pub fn default_kind(kind: &str) -> Option<NodeKind> {
         "noise" => NodeKind::Noise {},
         "low_pass" => NodeKind::LowPass {
             cutoff_hz: param("cutoff_hz")?,
+            wet: param("wet")?,
         },
         "gain" => NodeKind::Gain {
             factor: param("factor")?,
@@ -245,6 +246,7 @@ pub struct VariadicInput {
 pub struct ParamDescriptor {
     pub name: String,
     pub label: String,
+    /// Presentation unit. A percentage displays a stored ratio on a 0–100 scale.
     pub unit: Option<String>,
     pub min: f64,
     pub max: f64,

@@ -203,7 +203,7 @@ impl Engine {
             .iter()
             .filter(|spec| upstream.contains(&spec.id))
             .filter_map(|spec| match spec.kind {
-                NodeKind::LowPass { cutoff_hz } => {
+                NodeKind::LowPass { cutoff_hz, .. } => {
                     let modulated = wired.contains_key(&sonicfusion_graph_api::PortRef {
                         node: spec.id.clone(),
                         port: "cutoff".into(),

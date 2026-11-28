@@ -555,17 +555,21 @@ fn param_problems(
                 problems.push(("pulse_width", "pulse width must be between 0 and 1".into()));
             }
         }
-        // A wired cutoff port replaces the constant, which the engine ignores.
-        NodeKind::LowPass { cutoff_hz } if !cutoff_wired => {
-            problems.extend(frequency_problem(
-                "cutoff_hz",
-                "cutoff",
-                *cutoff_hz,
-                true,
-                session,
-            ));
+        NodeKind::LowPass { cutoff_hz, wet } => {
+            // A wired cutoff port replaces the constant, which the engine ignores.
+            if !cutoff_wired {
+                problems.extend(frequency_problem(
+                    "cutoff_hz",
+                    "cutoff",
+                    *cutoff_hz,
+                    true,
+                    session,
+                ));
+            }
+            if !(0.0..=1.0).contains(wet) {
+                problems.push(("wet", "Dry/Wet must be between 0% and 100%".into()));
+            }
         }
-        NodeKind::LowPass { .. } => {}
         NodeKind::Gain { factor } => {
             if !fits_f32(*factor) {
                 problems.push(("factor", "gain factor must be a finite number".into()));
@@ -747,9 +751,13 @@ mod tests {
     #[test]
     fn a_wired_cutoff_ignores_the_constant() {
         let mut graph = chain();
-        graph
-            .nodes
-            .push(node("lpf", NodeKind::LowPass { cutoff_hz: 0.0 }));
+        graph.nodes.push(node(
+            "lpf",
+            NodeKind::LowPass {
+                cutoff_hz: 0.0,
+                wet: 1.0,
+            },
+        ));
         graph
             .nodes
             .push(node("lfo", NodeKind::Sine { frequency_hz: 1.0 }));
@@ -760,6 +768,22 @@ mod tests {
             wire("gain", "out", "in"),
         ];
         assert!(validate(&graph, &session()).is_empty());
+        for wet in [-0.1, 1.1, f64::NAN] {
+            let mut invalid = graph.clone();
+            invalid
+                .nodes
+                .iter_mut()
+                .find(|node| node.id.0 == "lpf")
+                .unwrap()
+                .kind = NodeKind::LowPass {
+                cutoff_hz: 0.0,
+                wet,
+            };
+            let issues = validate(&invalid, &session());
+            assert_eq!(issues.len(), 1);
+            assert_eq!(issues[0].param.as_deref(), Some("wet"));
+            assert_eq!(issues[0].severity, Error);
+        }
         graph.wires.remove(1);
         assert!(codes(&graph).contains(&(Error, IssueCode::InvalidParameter, Some("lpf".into()))));
     }
@@ -816,7 +840,13 @@ mod tests {
                         pulse_width: 1.5,
                     },
                 ),
-                node("cut", NodeKind::LowPass { cutoff_hz: 0.0 }),
+                node(
+                    "cut",
+                    NodeKind::LowPass {
+                        cutoff_hz: 0.0,
+                        wet: 1.0,
+                    },
+                ),
                 node("nan", NodeKind::Gain { factor: f64::NAN }),
                 node(
                     "mix",

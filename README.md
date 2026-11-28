@@ -27,6 +27,17 @@ mix([$high, $low], [0.4, 0.6]) -> out
 `$high -> gain(0.5)`. `out` applies the final frame limit from `RenderConfig`,
 which the preview command derives from `--seconds`.
 
+The Low-pass node's Dry/Wet slider blends the dry input with the filtered output.
+Well above the cutoff the filter increasingly attenuates the wet signal, so
+the blend approaches the dry share. Spectrum shows this asymptotic floor
+relative to the input below 100% wet. At 70% wet, the dry share of 0.3 gives a
+floor of about −10.5 dB.
+
+In the DSL, `lpf(cutoff, wet)` takes a wet ratio from 0 to 1 and defaults to
+1 (fully wet), as do saved patches without a ratio. For example,
+`sine(440) -> lpf(500, 0.25) -> out` uses 25% filtered signal. The ratio also
+works with a wired cutoff, as in `lpf($audio, $cutoff, 0.25)`.
+
 `sawtooth(frequency)` generates a rising bipolar ramp from -1 toward +1,
 wrapping to -1 each cycle. Frequency is in hertz, must be nonnegative and below
 Nyquist, and zero holds -1. The Rust API is

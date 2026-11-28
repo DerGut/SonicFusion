@@ -67,12 +67,27 @@ pub enum NodeKind {
     /// A connected `cutoff` port uses the session's fixed modulation mapping.
     LowPass {
         cutoff_hz: f64,
+        /// Wet ratio in [0, 1]. Fully wet when omitted from a saved graph.
+        #[serde(
+            default = "fully_wet",
+            skip_serializing_if = "is_fully_wet",
+            alias = "mix"
+        )]
+        wet: f64,
     },
     /// One input port `in.<i>` per weight.
     Mix {
         weights: Vec<f64>,
     },
     Output {},
+}
+
+fn fully_wet() -> f64 {
+    1.0
+}
+
+fn is_fully_wet(wet: &f64) -> bool {
+    *wet == fully_wet()
 }
 
 impl NodeKind {
@@ -162,7 +177,10 @@ mod tests {
     fn node_kinds_use_adjacent_tags() {
         let node = NodeSpec {
             id: NodeId::new("lpf"),
-            kind: NodeKind::LowPass { cutoff_hz: 1200.0 },
+            kind: NodeKind::LowPass {
+                cutoff_hz: 1200.0,
+                wet: 1.0,
+            },
         };
         let json = serde_json::to_value(&node).unwrap();
         assert_eq!(
@@ -170,6 +188,18 @@ mod tests {
             serde_json::json!({"id": "lpf", "kind": "low_pass", "params": {"cutoff_hz": 1200.0}})
         );
         assert_eq!(serde_json::from_value::<NodeSpec>(json).unwrap(), node);
+
+        let mixed = serde_json::json!({
+            "id": "lpf", "kind": "low_pass", "params": {"cutoff_hz": 1200.0, "wet": 0.375}
+        });
+        let blended: NodeSpec = serde_json::from_value(mixed.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&blended).unwrap(), mixed);
+        let previous = serde_json::json!({
+            "id": "lpf", "kind": "low_pass", "params": {"cutoff_hz": 1200.0, "mix": 0.375}
+        });
+        let restored: NodeSpec = serde_json::from_value(previous).unwrap();
+        assert_eq!(restored, blended);
+        assert_eq!(serde_json::to_value(&restored).unwrap(), mixed);
 
         let out = serde_json::json!({"id": "out", "kind": "output", "params": {}});
         assert_eq!(

@@ -242,7 +242,7 @@ impl Decoder<'_> {
                     .lower(cutoff, depth + 1)
                     .map_err(|e| e.at_input("cutoff"))?;
                 (
-                    Node::LowPass(audio.id, PreparedCutoff::Modulated(cutoff.id)),
+                    Node::LowPass(audio.id, PreparedCutoff::Modulated(cutoff.id), 1.0),
                     false,
                     1 + audio.expanded_nodes + cutoff.expanded_nodes,
                     1 + audio.wire_depth.max(cutoff.wire_depth),

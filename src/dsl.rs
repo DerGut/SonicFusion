@@ -218,8 +218,8 @@ fn prepare_node(
             ))
         }
         "lpf" => {
-            let (input, cutoff) = lpf_args(source, at, bindings, incoming, args)?;
-            Ok(Node::LowPass(input, cutoff))
+            let (input, cutoff, mix) = lpf_args(source, at, bindings, incoming, args)?;
+            Ok(Node::LowPass(input, cutoff, mix))
         }
         "mix" => {
             let (inputs, gains) = mix_args(source, at, bindings, incoming, args)?;
@@ -288,19 +288,25 @@ fn lpf_args(
     bindings: &HashMap<String, NodeId>,
     incoming: Option<NodeId>,
     args: &[Arg],
-) -> Result<(NodeId, PreparedCutoff), DslError> {
-    let (input, cutoff_arg) = match (incoming, args) {
-        (Some(input), [cutoff]) => (input, cutoff),
-        (None, [Arg::Ref(input_name), cutoff]) => {
-            (reference(source, at, bindings, input_name)?, cutoff)
+) -> Result<(NodeId, PreparedCutoff, f64), DslError> {
+    let bad_args = || {
+        error(
+            source,
+            at,
+            "lpf expects one input, a numeric or $reference cutoff, and an optional numeric wet ratio",
+        )
+    };
+    let (input, args) = match (incoming, args) {
+        (Some(input), args) => (input, args),
+        (None, [Arg::Ref(input_name), args @ ..]) => {
+            (reference(source, at, bindings, input_name)?, args)
         }
-        _ => {
-            return Err(error(
-                source,
-                at,
-                "lpf expects one input and one numeric or $reference cutoff",
-            ));
-        }
+        _ => return Err(bad_args()),
+    };
+    let (cutoff_arg, mix) = match args {
+        [cutoff] => (cutoff, 1.0),
+        [cutoff, Arg::Number(mix)] => (cutoff, *mix),
+        _ => return Err(bad_args()),
     };
     let cutoff = match cutoff_arg {
         Arg::Number(hz) if hz.is_finite() => PreparedCutoff::ConstantHz(*hz),
@@ -313,7 +319,7 @@ fn lpf_args(
             ));
         }
     };
-    Ok((input, cutoff))
+    Ok((input, cutoff, mix))
 }
 
 fn mix_args(
@@ -707,6 +713,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn low_pass_accepts_a_mix_in_both_syntaxes() {
+        let config = RenderConfig::builder()
+            .sample_rate_hz(8_000)
+            .frame_count(32)
+            .batch_frame_capacity(7)
+            .build()
+            .unwrap();
+        let chained = "sine(400) -> lpf(100, 0.375) -> out";
+        let referenced = "sine(400) -> $A; lpf($A, 100, 0.375) -> out";
+        let chained = collect(
+            build_plan(chained, &config).unwrap(),
+            Arc::new(TaskContext::default()),
+        )
+        .await
+        .unwrap();
+        let referenced = collect(
+            build_plan(referenced, &config).unwrap(),
+            Arc::new(TaskContext::default()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            decode_from_frames(&chained, &config).unwrap(),
+            decode_from_frames(&referenced, &config).unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn implicit_and_explicit_unary_inputs_are_equivalent() {
         let config = RenderConfig::builder()
             .sample_rate_hz(8)
@@ -772,6 +806,11 @@ mod tests {
             (
                 "sine(440) -> lpf(100000) -> out",
                 "cutoff_hz must be below Nyquist",
+            ),
+            ("sine(440) -> lpf(1000, 1.01) -> out", "low-pass wet ratio"),
+            (
+                "sine(2) -> $cutoff; sine(440) -> lpf($cutoff, -0.1) -> out",
+                "low-pass wet ratio",
             ),
             ("sine(440) -> out -> gain(0.5)", "out must end a statement"),
             (

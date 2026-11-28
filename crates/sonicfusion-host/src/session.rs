@@ -512,6 +512,7 @@ mod tests {
             "lpf",
             NodeKind::LowPass {
                 cutoff_hz: 20_000.0,
+                wet: 1.0,
             },
         ));
         with_lpf.wires[0] = wire("osc", "lpf", "in");

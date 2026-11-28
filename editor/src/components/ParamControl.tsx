@@ -22,6 +22,13 @@ export function fromSlider(descriptor: ParamDescriptor, position: number): numbe
 
 export function formatValue(descriptor: ParamDescriptor, value: number): string {
   if (descriptor.unit === "Hz") return formatHz(value);
+  if (descriptor.unit === "%") {
+    const percentage = Number((value * 100).toFixed(1));
+    if (descriptor.name !== "wet") return `${percentage}%`;
+    if (value > 0 && value < 0.001) return "<0.1% wet";
+    if (value > 0.999 && value < 1) return ">99.9% wet";
+    return `${percentage}% wet`;
+  }
   return value.toFixed(2);
 }
 
@@ -40,9 +47,15 @@ interface Props {
 export function ParamControl({ id, descriptor, label, value, invalid, onChange, onBeginContinuous }: Props) {
   const [typing, setTyping] = useState<string | null>(null);
   const position = toSlider(descriptor, value);
+  const percent = descriptor.unit === "%";
+  const editValue = percent ? String(Number((value * 100).toPrecision(15))) : String(value);
   const commit = () => {
-    const parsed = Number(typing);
-    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
+    const text = typing?.trim();
+    const numberText = percent ? text?.replace(/%$/, "").trim() : text;
+    const parsed = Number(numberText) / (percent ? 100 : 1);
+    if (numberText && text !== editValue && Number.isFinite(parsed) && parsed !== value) {
+      onChange(parsed, false);
+    }
     setTyping(null);
   };
   return (
@@ -52,11 +65,11 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
         {typing === null ? (
           <button type="button" className="value nodrag" title="Click to type a value"
             aria-label={`${label ?? descriptor.label}: ${formatValue(descriptor, value)}. Type a value`}
-            onClick={() => setTyping(String(value))}>
+            onClick={() => setTyping(editValue)}>
             {formatValue(descriptor, value)}
           </button>
         ) : (
-          <input className="value-input nodrag" autoFocus aria-label={`${label ?? descriptor.label} value`}
+          <input className="value-input nodrag" autoFocus aria-label={`${label ?? descriptor.label} value${percent ? " (%)" : ""}`}
             onFocus={(event) => event.target.select()}
             value={typing} onChange={(event) => setTyping(event.target.value)} onBlur={commit}
             onKeyDown={(event) => {
