@@ -9,6 +9,8 @@ const strokes: Record<NodeKind, string[]> = {
   gain: ["M3 13V10", "M8 13V6.5", "M13 13V3"],
   mix: ["M1 4C6 4 7 8 10 8", "M1 12C6 12 7 8 10 8", "M10 8H15"],
   output: ["M2 6H5L9 3V13L5 10H2Z", "M12 5.5C13 6.5 13 9.5 12 10.5"],
+  // PROTOTYPE #34
+  envelope: ["M1 13L4 3L7 7H11L15 13"],
 };
 
 export function KindIcon({ kind, size = 14 }: { kind: NodeKind; size?: number }) {

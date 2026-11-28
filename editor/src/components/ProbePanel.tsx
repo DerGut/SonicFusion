@@ -8,7 +8,9 @@ import { formatDb, formatHz, spectrumDb, strongestPartial, triggerIndex } from "
 import { describe } from "../state/useEngineSession";
 import { Icon } from "./icons";
 // PROTOTYPE #41
-import { PanelRename, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
+import { PanelRename, useDocNodes, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
+// PROTOTYPE #34/#39
+import { SlowScope, formatSeconds, gateSource, probeFrames } from "../prototype/envelope.prototype";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
@@ -33,9 +35,13 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
   renameFocus?: number;
 }) {
   const label = useNodeLabel();
+  const docNodes = useDocNodes();
   const nameVariant = useVariant("name");
   const [view, setView] = useState<"scope" | "spectrum">("scope");
   const [probe, setProbe] = useState<ProbeWindow | null>(null);
+  const [gateProbe, setGateProbe] = useState<number[]>([]);
+  const frames = probeFrames(graph, node, session.sample_rate_hz, PROBE_FRAMES);
+  const gateId = node.kind === "envelope" ? gateSource(graph, node.id)?.id : undefined;
   /** Why there is no signal: an unfinished branch is normal while editing. */
   const [unavailable, setUnavailable] = useState<{ text: string; problem: boolean } | null>(null);
   const graphJson = JSON.stringify(graph);
@@ -46,9 +52,12 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
     // One probe at a time; while playing, the next starts after the last returns.
     const run = () =>
       client
-        .probe(JSON.parse(graphJson) as GraphSpec, node.id, PROBE_FRAMES)
-        .then((result) => {
+        .probe(JSON.parse(graphJson) as GraphSpec, node.id, frames)
+        .then(async (result) => {
           if (cancelled) return;
+          const gate = gateId ? (await client.probe(JSON.parse(graphJson) as GraphSpec, gateId, frames)).samples : [];
+          if (cancelled) return;
+          setGateProbe(gate);
           setProbe(result);
           setUnavailable(null);
         })
@@ -65,12 +74,14 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [client, graphJson, node.id, playing]);
+  }, [client, graphJson, node.id, playing, frames, gateId]);
 
   const samples = useMemo(() => probe?.samples ?? [], [probe]);
   const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
   const rate = probe?.sample_rate_hz ?? session.sample_rate_hz;
-  const spectrum = useMemo(() => (samples.length === PROBE_FRAMES ? spectrumDb(samples) : []), [samples]);
+  const spectrum = useMemo(() => (samples.length >= PROBE_FRAMES ? spectrumDb(samples.slice(0, PROBE_FRAMES)) : []), [samples]);
+  const slow = frames !== PROBE_FRAMES;
+  const wet = node.kind === "low_pass" ? Number(node.params.wet ?? 1) : 1;
   const partial = strongestPartial(spectrum, rate);
   const partialPitch = view === "spectrum" && partial?.canNamePitch ? pitchFromHz(partial.hz) : null;
   const partialLabel = partial ? (partial.canNamePitch ? "" : "≈") + formatHz(partial.hz) : "—";
@@ -105,12 +116,14 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
           {unavailable ? (
             <p className={`plot-message${unavailable.problem ? " error" : ""}`}>{unavailable.text}</p>
           ) : view === "scope" ? (
-            <Scope samples={samples} rate={rate} />
+            slow ? <SlowScope samples={samples} gate={gateProbe} rate={rate} outline={node.kind === "envelope"} /> : <Scope samples={samples} rate={rate} />
           ) : (
             <Spectrum spectrum={spectrum} rate={rate} cutoff={cutoff} />
           )}
           <span className="plot-label">
-            {view === "scope" ? `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled` : "dBFS · 20 Hz – 20 kHz · log"}
+            {view === "scope"
+              ? slow ? node.kind === "envelope" ? `${formatSeconds(frames / rate)} · gate dashed · peak per 10 ms` : `${formatSeconds(frames / rate)} · two cycles` : `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
+              : "dBFS · 20 Hz – 20 kHz · log"}
           </span>
         </div>
         <dl className="readouts">
@@ -120,7 +133,13 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
             <dd>{partialLabel}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
           </div>
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
-          <div><dt>Window</dt><dd>{PROBE_FRAMES} frames</dd></div>
+          {node.kind === "low_pass" && wet < 1 && (
+            <div title="A one-pole low-pass blended with its input levels off at the dry share well above cutoff">
+              <dt>Above cutoff</dt><dd>{wet <= 0 ? "unfiltered" : `${formatDb(20 * Math.log10(1 - wet))} floor`}</dd>
+            </div>
+          )}
+          {slow && gateId && <div><dt>Gate</dt><dd>{label(docNodes.get(gateId), gateId)}</dd></div>}
+          <div><dt>Window</dt><dd>{slow ? formatSeconds(frames / rate) : `${PROBE_FRAMES} frames`}</dd></div>
         </dl>
       </div>
     </section>

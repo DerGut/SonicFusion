@@ -12,6 +12,7 @@ import { ProbePanel } from "./components/ProbePanel";
 import { StatusBar } from "./components/StatusBar";
 import { TopBar } from "./components/TopBar";
 // PROTOTYPE #33/#41
+import { gateScenario } from "./prototype/envelope.prototype";
 import { DocNodesProvider, PatchUnitToggle, PrototypeSwitcher, RenameFocusProvider, edgeScenario, useNodeLabel } from "./prototype/design-33-41.prototype";
 import {
   type Catalog,
@@ -94,7 +95,8 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
   // Sample rate and limits follow the output device each time playback starts.
   const [session, setSession] = useState(initialSession);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
-    doc: new URLSearchParams(window.location.search).has("scenario") ? edgeScenario(studioDocument(studioPatch as GraphSpec)) : loadDocument() ?? studioDocument(studioPatch as GraphSpec),
+    doc: new URLSearchParams(window.location.search).get("scenario") === "gate" ? gateScenario(studioDocument(studioPatch as GraphSpec))
+      : new URLSearchParams(window.location.search).has("scenario") ? edgeScenario(studioDocument(studioPatch as GraphSpec)) : loadDocument() ?? studioDocument(studioPatch as GraphSpec),
     past: [],
     future: [],
   }));

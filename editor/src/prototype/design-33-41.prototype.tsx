@@ -24,13 +24,18 @@ import { ParameterRange, fromSlider, toSlider } from "../components/ParamControl
 
 // ---------------------------------------------------------------- URL state
 
-type Key = "pitch" | "name";
+type Key = "pitch" | "name" | "env";
 const VARIANTS: Record<Key, { id: string; label: string }[]> = {
   pitch: [
     { id: "A", label: "Current: per-param Hz/Note select" },
     { id: "B", label: "Patch-wide unit, dual readout" },
     { id: "C", label: "Both units, keyboard popover" },
     { id: "D", label: "Per-node unit, role default" },
+  ],
+  env: [
+    { id: "A", label: "Four slider rows" },
+    { id: "B", label: "Curve editor" },
+    { id: "C", label: "2×2 compact sliders" },
   ],
   name: [
     { id: "A", label: "Current: pencil button" },
@@ -76,6 +81,7 @@ export function edgeScenario(doc: EditorDocument): EditorDocument {
 export function PrototypeSwitcher() {
   const pitch = useVariant("pitch");
   const name = useVariant("name");
+  const env = useVariant("env");
   if (!import.meta.env.DEV) return null;
   const group = (key: Key, current: string, issue: string) => {
     const list = VARIANTS[key];
@@ -94,6 +100,7 @@ export function PrototypeSwitcher() {
     <div className="proto-switcher" role="toolbar" aria-label="Prototype variants">
       {group("pitch", pitch, "#33 pitch")}
       {group("name", name, "#41 name")}
+      {group("env", env, "#34 env")}
     </div>
   );
 }
@@ -267,7 +274,7 @@ export function useModulatedReadout(): ((baseHz: number, depthHz: number, curren
  * stored only when the user overrides it (in the real version, on DocNode
  * next to `displayName`; here in memory).
  */
-type Unit = "hz" | "note";
+type Unit = "hz" | "note" | "bpm";
 const unitOverrides = new Map<string, Unit>();
 const overrideListeners = new Set<() => void>();
 let overrideVersion = 0;
@@ -287,12 +294,23 @@ function useUnitOverride(key: string): Unit | undefined {
 }
 if (new URLSearchParams(window.location.search).get("scenario") === "edge") unitOverrides.set("osc_b:frequency_hz", "hz");
 
+/** What the node's output feeds, which decides the unit it leads with. */
+export type FrequencyRole = "audio" | "control" | "gate";
+
+/** #42: one oscillator cycle is one beat. */
+const toBpm = (hz: number) => Number((hz * 60).toPrecision(4));
+const formatBpm = (hz: number) => `${toBpm(hz)}\u202FBPM`;
+/** Accepts `120 bpm` on top of Hz and note names. */
+function parseRate(text: string): number {
+  const bpm = /^\s*(\d+(?:\.\d+)?)\s*bpm\s*$/i.exec(text);
+  return bpm ? Number(bpm[1]) / 60 : parseFrequency(text);
+}
+
 /** Replaces ParamControl for frequency params in variants B–D. Returns null for A. */
-export function PrototypeFrequency({ id, nodeId, modulator, descriptor, value, invalid, onChange, onBeginContinuous }: {
+export function PrototypeFrequency({ id, nodeId, role, descriptor, value, invalid, onChange, onBeginContinuous }: {
   id: string;
   nodeId: string;
-  /** The node feeds a control port, so its frequency is a rate. */
-  modulator: boolean;
+  role: FrequencyRole;
   descriptor: ParamDescriptor;
   value: number;
   invalid?: string;
@@ -307,46 +325,59 @@ export function PrototypeFrequency({ id, nodeId, modulator, descriptor, value, i
   const override = useUnitOverride(overrideKey);
   if (variant === "A") return null;
   const pitch = isPitch(value) ? pitchFromHz(value) : null;
-  const roleUnit: Unit = modulator || !pitch ? "hz" : "note";
-  const nodeUnit = override ?? roleUnit;
-  const notePrimary = variant === "D" ? nodeUnit === "note" && pitch !== null : variant === "C" || unit === "note";
+  const modulator = role !== "audio";
+  // BPM only for oscillator frequencies, and only at rhythmic (sub-audio) rates.
+  const oscillator = descriptor.name === "frequency_hz";
+  const rhythmic = oscillator && !pitch;
+  const roleUnit: Unit = role === "gate" && rhythmic ? "bpm" : modulator || !pitch ? "hz" : "note";
+  const wanted = override ?? roleUnit;
+  const nodeUnit: Unit = variant !== "D" ? "hz" : wanted === "note" && pitch ? "note" : wanted === "bpm" && rhythmic ? "bpm" : "hz";
+  const notePrimary = variant === "D" ? nodeUnit === "note" : variant === "C" || unit === "note";
+  const bpmPrimary = nodeUnit === "bpm";
+  /** The other unit of the pair: Note ⇄ Hz at audible rates, Hz ⇄ BPM below. */
+  const pairUnit: Unit | null = pitch ? (notePrimary ? "hz" : "note") : rhythmic ? (bpmPrimary ? "hz" : "bpm") : null;
 
-  const primary = pitch && notePrimary ? compactPitch(pitch) : formatHz(value);
-  const rate = !pitch;
-  const secondary = variant === "D" && rate ? "rate"
+  const primary = notePrimary && pitch ? compactPitch(pitch) : bpmPrimary ? formatBpm(value) : formatHz(value);
+  const rate = pairUnit === null;
+  const secondary = variant === "D"
+    ? pairUnit === "hz" ? compactHz(value) : pairUnit === "note" ? nearestNote(pitch!) : pairUnit === "bpm" ? formatBpm(value) : "rate"
     : pitch ? (notePrimary ? compactHz(value) : nearestNote(pitch)) : variant === "B" && unit === "note" ? "rate" : null;
   const commit = () => {
     if (typing !== null && typing.trim() !== "") {
-      const parsed = parseFrequency(typing);
+      const parsed = parseRate(typing);
       if (Number.isFinite(parsed) && parsed > 0) onChange(parsed, false);
     }
     setTyping(null);
   };
-  // B in Note mode and D on note-led nodes snap the drag to semitones; ⌥ drags freely.
-  const snap = (variant === "B" || variant === "D") && notePrimary && pitch !== null;
-  const popover = variant === "C" || (variant === "D" && notePrimary);
+  // Note-led rows snap to semitones, BPM-led rows to whole beats; ⌥ drags freely.
+  const snap = (variant === "B" || variant === "D") && (notePrimary || bpmPrimary);
+  const popover = variant === "C" || (variant === "D" && (notePrimary || bpmPrimary));
   const move = (position: number, event?: { altKey: boolean }) => {
     const hz = fromSlider(descriptor, position);
-    if (!snap || event?.altKey || !isPitch(hz)) return onChange(hz, true);
-    onChange(Number(pitchToHz({ midi: Math.round(hzToMidi(hz)), cents: 0 }).toPrecision(6)), true);
+    if (!snap || event?.altKey) return onChange(hz, true);
+    if (bpmPrimary && !isPitch(hz)) return onChange(Math.max(1, Math.round(hz * 60)) / 60, true);
+    if (notePrimary && isPitch(hz)) return onChange(Number(pitchToHz({ midi: Math.round(hzToMidi(hz)), cents: 0 }).toPrecision(6)), true);
+    onChange(hz, true);
   };
+  const label = variant === "D" && oscillator ? (notePrimary ? "Pitch" : bpmPrimary ? "Tempo" : descriptor.label) : descriptor.label;
+  const defaultFor = role === "gate" ? "a gate clock" : modulator ? "a modulator" : "an audio source";
 
   return (
     <div className={`param proto-freq${invalid ? " invalid" : ""}`} title={invalid}>
       <div className="param-top">
-        {/* A note-led oscillator row reads as pitch; the shorter label leaves room for both units. */}
-        <label htmlFor={id}>{variant === "D" && notePrimary && descriptor.name === "frequency_hz" ? "Pitch" : descriptor.label}</label>
+        {/* Note-led rows read as pitch and BPM-led rows as tempo; the shorter labels leave room for both units. */}
+        <label htmlFor={id}>{label}</label>
         {typing === null && variant === "D" ? (
           <span className="proto-dual">
             <button type="button" className="value nodrag"
-              title={popover ? "Click for keyboard, detune and exact value" : "Click to type Hz or a note (C#4, A3 +12c)"}
+              title={notePrimary ? "Click for keyboard, detune and exact value" : bpmPrimary ? "Click for tempo presets and tap tempo" : "Click to type Hz, a note (C#4) or a tempo (120 bpm)"}
               onClick={() => (popover ? setOpen(!open) : setTyping(String(value)))}>
               {primary}
             </button>
             {secondary && (rate ? <span className="proto-secondary">{secondary}</span> : (
               <button type="button" className={`proto-secondary proto-swap nodrag${override ? " overridden" : ""}`}
-                title={`Lead with ${notePrimary ? "Hz" : "the note"} on this node${override ? "" : ` (default for ${modulator ? "a modulator" : "an audio source"})`}`}
-                onClick={() => { setOpen(false); setOverride(overrideKey, notePrimary ? "hz" : "note", roleUnit); }}>
+                title={`Lead with ${pairUnit === "note" ? "the note" : pairUnit === "bpm" ? "BPM" : "Hz"} on this node${override ? "" : ` (default for ${defaultFor})`}`}
+                onClick={() => { setOpen(false); setOverride(overrideKey, pairUnit!, roleUnit); }}>
                 {secondary}
               </button>
             ))}
@@ -366,10 +397,70 @@ export function PrototypeFrequency({ id, nodeId, modulator, descriptor, value, i
       </div>
       <ParameterRange id={id} min={0} max={1000} step="any" position={toSlider(descriptor, value)}
         valueText={primary} onBeginContinuous={onBeginContinuous} onMove={move} />
-      {open && pitch && (
+      {open && pitch && notePrimary && (
         <KeyboardPopover descriptor={descriptor} value={value} onClose={() => setOpen(false)}
           onBeginContinuous={onBeginContinuous} onChange={onChange} />
       )}
+      {open && bpmPrimary && (
+        <TempoPopover value={value} onClose={() => setOpen(false)} onBeginContinuous={onBeginContinuous} onChange={onChange} />
+      )}
+    </div>
+  );
+}
+
+const TEMPO_PRESETS = [60, 90, 100, 120, 128, 140, 174];
+
+/** #42: presets, halve/double and tap tempo, parallel to the note keyboard. */
+function TempoPopover({ value, onChange, onBeginContinuous, onClose }: {
+  value: number;
+  onChange: (value: number, continuous: boolean) => void;
+  onBeginContinuous: () => void;
+  onClose: () => void;
+}) {
+  const taps = useRef<number[]>([]);
+  const [text, setText] = useState<string | null>(null);
+  const bpm = toBpm(value);
+  const set = (next: number) => {
+    onBeginContinuous();
+    // Stays below 20 Hz (1200 BPM) so the row keeps its BPM pairing.
+    onChange(Math.min(1199, Math.max(1, next)) / 60, false);
+  };
+  const tap = () => {
+    const now = performance.now();
+    taps.current = [...taps.current.filter((time) => now - time < 2500), now].slice(-5);
+    if (taps.current.length < 2) return;
+    const gaps = taps.current.slice(1).map((time, index) => time - taps.current[index]);
+    set(Math.round(60000 / (gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length)));
+  };
+  return (
+    <div className="proto-popover nodrag nowheel" onKeyDown={(event) => event.key === "Escape" && onClose()}>
+      <div className="proto-pop-head">
+        <span>One cycle per beat</span>
+        <span className="spacer" />
+        <button type="button" aria-label="Close" onClick={onClose}><Icon name="close" size={12} /></button>
+      </div>
+      <div className="proto-tempo-presets">
+        {TEMPO_PRESETS.map((preset) => (
+          <button key={preset} type="button" className={preset === bpm ? "on" : ""} onClick={() => set(preset)}>{preset}</button>
+        ))}
+      </div>
+      <div className="proto-tempo-row">
+        <button type="button" onClick={() => set(Math.round(bpm / 2))} title="Half tempo">÷2</button>
+        <button type="button" onClick={() => set(Math.round(bpm * 2))} title="Double tempo">×2</button>
+        <button type="button" className="proto-tap" onClick={tap} title="Tap at least twice">Tap</button>
+      </div>
+      <div className="param-top">
+        <label>Exact</label>
+        <input className="value-input" value={text ?? `${bpm} bpm`} aria-label="Tempo in BPM"
+          onFocus={(event) => { setText(String(bpm)); event.target.select(); }}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={() => {
+            const parsed = text === null ? NaN : /hz|[a-g]/i.test(text) ? parseRate(text) * 60 : Number(text.replace(/bpm/i, ""));
+            if (Number.isFinite(parsed) && parsed > 0) set(parsed);
+            setText(null);
+          }}
+          onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
+      </div>
     </div>
   );
 }

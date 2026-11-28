@@ -10,6 +10,7 @@ import { KindIcon } from "./icons";
 import { OutputMeter } from "./OutputMeter";
 import { FrequencyModeSelect, ParamControl, type FrequencyMode } from "./ParamControl";
 // PROTOTYPE #33/#41
+import { EnvelopeBody } from "../prototype/envelope.prototype";
 import { PrototypeFrequency, PrototypeTitle, useDocNodes, useModulatedReadout, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
@@ -74,7 +75,20 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     });
   }
 
-  descriptor.params.forEach((param) => {
+  if (node.kind === "envelope") {
+    const gate = ports.find((port) => port.name === "gate")!;
+    const body = EnvelopeBody({
+      node, descriptor, gateFrom: sources.gate, rowTop: rowPortTop,
+      gateHandle: (top) => inputHandle(gate, top),
+      paramIssue,
+      setParam: (name, value, continuous) => actions.setParam(node.id, name, value, continuous),
+      beginContinuous: actions.beginContinuous,
+    });
+    rows.push(...body.rows);
+    handles.push(...body.handles);
+  }
+
+  if (node.kind !== "envelope") descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
     const isCutoff = param.name === "cutoff_hz";
@@ -100,7 +114,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     } else if (pitchVariant !== "A" && (isCutoff || isOscillatorFrequency)) {
       rows.push(
         <PrototypeFrequency key={param.name} id={`${node.id}-${param.name}`} nodeId={node.id} descriptor={param}
-          modulator={data.outgoing.some((wire) => wire.endsWith(":cutoff"))}
+          role={data.outgoing.some((wire) => wire.endsWith(":gate")) ? "gate" : data.outgoing.some((wire) => wire.endsWith(":cutoff")) ? "control" : "audio"}
           value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
           onBeginContinuous={actions.beginContinuous}
           onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />,
@@ -108,7 +122,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     } else {
       rows.push(
         <ParamControl key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
-          value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
+          value={Number(node.params[param.name] ?? param.default)} invalid={paramIssue(param.name)}
           frequency={isCutoff || isOscillatorFrequency
             ? { mode: frequencyMode, onModeChange: setFrequencyMode, semitones: isOscillatorFrequency }
             : undefined}

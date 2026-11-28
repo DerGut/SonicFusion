@@ -37,7 +37,8 @@ export class MockEngine implements EngineClient {
   private revisionListeners = new Set<(event: RevisionEvent) => void>();
 
   async catalog() {
-    return catalogJson as NodeDescriptor[];
+    // PROTOTYPE #34/#39: the envelope node and the low-pass wet param aren't in the engine yet.
+    return prototypeCatalog(catalogJson as NodeDescriptor[]);
   }
 
   async sessionInfo() {
@@ -157,6 +158,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in"];
     case "low_pass":
       return ["in"];
+    case "envelope":
+      return ["in", "gate"];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -242,6 +245,11 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     };
     const p = (name: string) => Number(node?.params[name] ?? 0);
     const noiseKey = mix32(seeds.get(id) ?? 0);
+    let filtered = 0;
+    // PROTOTYPE #34: envelope state depends on the gate's history, so replay it from frame 0.
+    const envelopeLevel = node?.kind === "envelope" && feeds.has(`${id}:gate`)
+      ? adsr(render(graph, feeds.get(`${id}:gate`)!, 0, start + frames), node.params, start)
+      : () => 0;
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
       const phase = (p("frequency_hz") * t) % 1;
@@ -273,15 +281,53 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           const control = feeds.has(`${id}:cutoff`) ? input("cutoff")[n] : null;
           const cutoff = control === null ? p("cutoff_hz") : INFO.cutoff_modulation.base_hz + INFO.cutoff_modulation.depth_hz * control;
           const a = 1 - Math.exp((-2 * Math.PI * cutoff) / INFO.sample_rate_hz);
-          out[n] = (n > 0 ? out[n - 1] * (1 - a) : 0) + a * input("in")[n];
+          filtered = filtered * (1 - a) + a * input("in")[n];
+          // PROTOTYPE #39: saved patches without `wet` stay fully filtered.
+          const wet = Number(node.params.wet ?? 1);
+          out[n] = (1 - wet) * input("in")[n] + wet * filtered;
           break;
         }
+        case "envelope":
+          out[n] = input("in")[n] * envelopeLevel(n);
+          break;
       }
     }
     cache.set(id, out);
     return out;
   };
   return Array.from(signal(root));
+}
+
+/** PROTOTYPE #34: linear ADSR. Attack is a rate (0→1 in A); decay reaches S in D; release lasts R from any level. */
+function adsr(gate: number[], params: Record<string, unknown>, start: number) {
+  const rate = INFO.sample_rate_hz;
+  const a = Number(params.attack_s), d = Number(params.decay_s), s = Number(params.sustain), r = Number(params.release_s);
+  const levels = new Float32Array(gate.length);
+  let level = 0;
+  let stage: "idle" | "attack" | "decay" | "sustain" | "release" = "idle";
+  let releaseStep = 0;
+  let high = false;
+  for (let n = 0; n < gate.length; n++) {
+    const nowHigh = gate[n] > 0;
+    if (nowHigh && !high) stage = "attack";
+    if (!nowHigh && high && stage !== "idle") {
+      stage = "release";
+      releaseStep = level / (r * rate);
+    }
+    high = nowHigh;
+    if (stage === "attack") {
+      level += 1 / (a * rate);
+      if (level >= 1) { level = 1; stage = "decay"; }
+    } else if (stage === "decay") {
+      level -= (1 - s) / (d * rate);
+      if (level <= s) { level = s; stage = "sustain"; }
+    } else if (stage === "release") {
+      level -= releaseStep;
+      if (level <= 0) { level = 0; stage = "idle"; }
+    }
+    levels[n] = level;
+  }
+  return (n: number) => levels[start + n];
 }
 
 function noiseSeeds(nodes: ReadonlyMap<string, NodeSpec>): Map<string, number> {
@@ -319,4 +365,32 @@ function mix32(value: number): number {
 
 function clamp(value: number) {
   return Math.max(-1, Math.min(1, value));
+}
+
+/** PROTOTYPE #34/#39 */
+function prototypeCatalog(catalog: NodeDescriptor[]): NodeDescriptor[] {
+  const time = (name: string, label: string, value: number) =>
+    ({ name, label, unit: "s", min: 0.001, max: 10, default: value, scale: "log" as const });
+  const withWet = catalog.map((node) => node.kind !== "low_pass" ? node : {
+    ...node,
+    params: [...node.params, { name: "wet", label: "Dry/Wet", unit: "%", min: 0, max: 1, default: 1, scale: "linear" as const }],
+  });
+  return [...withWet.filter((node) => node.kind !== "output"), {
+    kind: "envelope",
+    label: "Envelope",
+    category: "utility",
+    signature: "env(in, gate)",
+    inputs: [
+      { name: "in", label: "in", signal: "audio", required: true },
+      { name: "gate", label: "Gate", signal: "control", required: true },
+    ],
+    variadic_input: null,
+    has_output: true,
+    params: [
+      time("attack_s", "Attack", 0.01),
+      time("decay_s", "Decay", 0.2),
+      { name: "sustain", label: "Sustain", unit: null, min: 0, max: 1, default: 0.7, scale: "linear" },
+      time("release_s", "Release", 0.3),
+    ],
+  }, ...withWet.filter((node) => node.kind === "output")];
 }

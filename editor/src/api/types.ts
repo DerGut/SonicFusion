@@ -9,7 +9,9 @@ export type NodeKind =
   | "gain"
   | "low_pass"
   | "mix"
-  | "output";
+  | "output"
+  // PROTOTYPE #34
+  | "envelope";
 
 export type ParamValue = number | number[];
 
