@@ -77,6 +77,42 @@ pub struct ProbeWindow {
     pub samples: Vec<f32>,
 }
 
+/// Bounded slow-scope preview. Each band is the minimum and maximum of a
+/// consecutive group of `bucket_frames` samples. The final group can be
+/// shorter. The gate trace shares this window's origin and duration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScopeWindow {
+    pub start_frame: u64,
+    pub sample_rate_hz: u32,
+    pub frames: usize,
+    pub bucket_frames: usize,
+    pub bands: Vec<[f32; 2]>,
+    pub gate: Option<ScopeGate>,
+}
+
+/// Gate states over a scope window, with an aggregate trace for dense gates.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScopeGate {
+    Edges {
+        start_open: bool,
+        /// Frame offsets from the scope origin. The state flips at each offset.
+        transitions: Vec<usize>,
+    },
+    Bands {
+        /// One state for every audio peak band in the same window.
+        states: Vec<GateBand>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateBand {
+    Closed,
+    Open,
+    Mixed,
+}
+
 /// Peak level of the active circuit's output over a window starting at the
 /// session's next output frame (admitted, not necessarily audible yet).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -98,6 +98,12 @@ export function strongestPartial(spectrum: number[], rate: number): { hz: number
   };
 }
 
+export function formatSeconds(seconds: number): string {
+  return Math.abs(seconds) < 1
+    ? `${Number((seconds * 1_000).toPrecision(3))} ms`
+    : `${Number(seconds.toPrecision(3))} s`;
+}
+
 export function formatHz(hz: number): string {
   if (hz < 10) return `${hz.toFixed(2)} Hz`;
   if (hz < 1000) return `${hz.toFixed(1)} Hz`;

@@ -583,6 +583,25 @@ fn param_problems(
                 problems.push(("weights", "mix weights must be finite numbers".into()));
             }
         }
+        NodeKind::Envelope {
+            attack_seconds,
+            decay_seconds,
+            sustain_level,
+            release_seconds,
+        } => {
+            for (param, label, seconds) in [
+                ("attack_seconds", "attack", attack_seconds),
+                ("decay_seconds", "decay", decay_seconds),
+                ("release_seconds", "release", release_seconds),
+            ] {
+                if !seconds.is_finite() || *seconds < 0.0 {
+                    problems.push((param, format!("{label} must be a finite nonnegative time")));
+                }
+            }
+            if !(0.0..=1.0).contains(sustain_level) {
+                problems.push(("sustain_level", "sustain must be between 0 and 1".into()));
+            }
+        }
         NodeKind::Noise {} | NodeKind::Output {} => {}
     }
     problems

@@ -6,6 +6,7 @@ const strokes: Record<NodeKind, string[]> = {
   sawtooth: ["M1 12L7 4V12L13 4V12"],
   noise: ["M1 8L3 5L5 12L7 3L9 10L11 6L13 12L15 8"],
   low_pass: ["M1 5H8C11 5 12 8 15 13"],
+  envelope: ["M1 13L4 3L8 8H11L15 13"],
   gain: ["M3 13V10", "M8 13V6.5", "M13 13V3"],
   mix: ["M1 4C6 4 7 8 10 8", "M1 12C6 12 7 8 10 8", "M10 8H15"],
   output: ["M2 6H5L9 3V13L5 10H2Z", "M12 5.5C13 6.5 13 9.5 12 10.5"],

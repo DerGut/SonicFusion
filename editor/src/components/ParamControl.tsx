@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { ParamDescriptor } from "../api/types";
-import { formatHz } from "../model/signal";
+import { formatHz, formatSeconds } from "../model/signal";
 import { ParameterRange } from "./ParameterRange";
 
 export const SLIDER_STEPS = 1000;
@@ -21,6 +21,7 @@ export function fromSlider(descriptor: ParamDescriptor, position: number): numbe
 }
 
 export function formatValue(descriptor: ParamDescriptor, value: number): string {
+  if (descriptor.unit === "s") return formatSeconds(value);
   if (descriptor.unit === "Hz") return formatHz(value);
   if (descriptor.unit === "%") {
     const percentage = Number((value * 100).toFixed(1));
@@ -58,6 +59,16 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
     }
     setTyping(null);
   };
+  const commitTyped = () => {
+    const suffix = descriptor.unit === "s" ? typing?.match(/^(.+?)\s*(ms|s)\s*$/i) : null;
+    if (!suffix) {
+      commit();
+      return;
+    }
+    const duration = Number(suffix[1]) / (suffix[2].toLowerCase() === "ms" ? 1_000 : 1);
+    if (Number.isFinite(duration) && duration !== value) onChange(duration, false);
+    setTyping(null);
+  };
   return (
     <div className={`param${invalid ? " invalid" : ""}`} title={invalid}>
       <div className="param-top">
@@ -71,9 +82,9 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
         ) : (
           <input className="value-input nodrag" autoFocus aria-label={`${label ?? descriptor.label} value${percent ? " (%)" : ""}`}
             onFocus={(event) => event.target.select()}
-            value={typing} onChange={(event) => setTyping(event.target.value)} onBlur={commit}
+            value={typing} onChange={(event) => setTyping(event.target.value)} onBlur={commitTyped}
             onKeyDown={(event) => {
-              if (event.key === "Enter") commit();
+              if (event.key === "Enter") commitTyped();
               if (event.key === "Escape") setTyping(null);
             }} />
         )}

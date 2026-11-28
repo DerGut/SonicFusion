@@ -9,6 +9,7 @@ use datafusion::physical_plan::limit::GlobalLimitExec;
 use crate::{
     ExecutionConfig, RenderConfig,
     graph::{GraphBuilder, Node, NodeId, Plan, PreparedCutoff, PreparedGraph},
+    physical::frame::Adsr,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -220,6 +221,29 @@ fn prepare_node(
         "lpf" => {
             let (input, cutoff, mix) = lpf_args(source, at, bindings, incoming, args)?;
             Ok(Node::LowPass(input, cutoff, mix))
+        }
+        "envelope" => {
+            let (audio, gate, durations) = match (incoming, args) {
+                (Some(audio), [Arg::Ref(gate), durations @ ..]) => (audio, gate, durations),
+                (None, [Arg::Ref(audio), Arg::Ref(gate), durations @ ..]) => (
+                    reference(source, at, bindings, audio)?,
+                    gate,
+                    durations,
+                ),
+                _ => return Err(bad("envelope expects audio and gate inputs followed by attack, decay, sustain, and release".into())),
+            };
+            let values = numeric_args(source, at, name, durations, 4)?;
+            let gate = reference(source, at, bindings, gate)?;
+            Ok(Node::Envelope {
+                audio,
+                gate,
+                adsr: Adsr {
+                    attack_seconds: values[0],
+                    decay_seconds: values[1],
+                    sustain_level: values[2],
+                    release_seconds: values[3],
+                },
+            })
         }
         "mix" => {
             let (inputs, gains) = mix_args(source, at, bindings, incoming, args)?;

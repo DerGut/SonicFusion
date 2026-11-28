@@ -16,6 +16,8 @@ use crate::{
     },
 };
 
+use crate::physical::frame::{Adsr, FrameEnvelopeExec};
+
 pub(crate) type Plan = Arc<dyn ExecutionPlan>;
 
 #[derive(Clone, Copy, Debug)]
@@ -36,6 +38,11 @@ pub(crate) enum Node {
     Gain(NodeId, f32),
     LowPass(NodeId, PreparedCutoff, f64),
     Mix(Vec<NodeId>, Vec<f32>),
+    Envelope {
+        audio: NodeId,
+        gate: NodeId,
+        adsr: Adsr,
+    },
 }
 
 pub(crate) struct GraphBuilder {
@@ -70,6 +77,7 @@ impl GraphBuilder {
                 }
                 validate_low_pass_mix(*mix)?;
             }
+            Node::Envelope { adsr, .. } => adsr.validate()?,
             Node::Mix(inputs, gains)
                 if inputs.is_empty()
                     || inputs.len() != gains.len()
@@ -143,6 +151,12 @@ impl PreparedGraph {
                     )?
                     .into_plan()
                 }
+                Node::Envelope { audio, gate, adsr } => Arc::new(FrameEnvelopeExec::try_new(
+                    config,
+                    input(audio),
+                    input(gate),
+                    adsr,
+                )?),
                 Node::Mix(ids, gains) => Arc::new(FrameMixExec::try_new(
                     config,
                     ids.into_iter().map(input).collect(),

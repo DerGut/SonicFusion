@@ -182,6 +182,66 @@
     "params": []
   },
   {
+    "kind": "envelope",
+    "label": "Envelope",
+    "category": "utility",
+    "signature": "envelope(gate, a, d, s, r)",
+    "inputs": [
+      {
+        "name": "in",
+        "label": "in",
+        "signal": "audio",
+        "required": true
+      },
+      {
+        "name": "gate",
+        "label": "Gate",
+        "signal": "control",
+        "required": true
+      }
+    ],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "attack_seconds",
+        "label": "Attack",
+        "unit": "s",
+        "min": 0.001,
+        "max": 10.0,
+        "default": 0.01,
+        "scale": "log"
+      },
+      {
+        "name": "decay_seconds",
+        "label": "Decay",
+        "unit": "s",
+        "min": 0.001,
+        "max": 10.0,
+        "default": 0.2,
+        "scale": "log"
+      },
+      {
+        "name": "sustain_level",
+        "label": "Sustain",
+        "unit": null,
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.7,
+        "scale": "linear"
+      },
+      {
+        "name": "release_seconds",
+        "label": "Release",
+        "unit": "s",
+        "min": 0.001,
+        "max": 10.0,
+        "default": 0.3,
+        "scale": "log"
+      }
+    ]
+  },
+  {
     "kind": "output",
     "label": "Output",
     "category": "output",

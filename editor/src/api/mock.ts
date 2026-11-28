@@ -1,5 +1,6 @@
 import catalogJson from "../../../crates/sonicfusion-graph-api/fixtures/catalog.json";
 
+import { envelopeGate } from "../model/scope";
 import type { EngineClient } from "./client";
 import type {
   CommandError,
@@ -11,14 +12,25 @@ import type {
   ProbeWindow,
   RevisionEvent,
   RevisionUpdate,
+  ScopeGate,
+  ScopeWindow,
   SessionInfo,
 } from "./types";
+
+const MAX_SCOPE_GATE_TRANSITIONS = 1_000;
 
 const INFO: SessionInfo = {
   sample_rate_hz: 48_000,
   batch_frames: 1024,
   cutoff_modulation: { base_hz: 1000, depth_hz: 900 },
 };
+
+export interface MockScopeRequest {
+  graph: GraphSpec;
+  node: string;
+  start: number;
+  seconds: number;
+}
 
 /**
  * A stand-in for the desktop host so the UI can be developed and tested in a
@@ -28,6 +40,10 @@ const INFO: SessionInfo = {
 export class MockEngine implements EngineClient {
   readonly label = "Mock engine";
   readonly live = false;
+
+  constructor(
+    private readonly renderScope: (request: MockScopeRequest) => ScopeWindow | Promise<ScopeWindow> = renderMockScope,
+  ) {}
 
   private revision = 0;
   private session = 0;
@@ -96,8 +112,8 @@ export class MockEngine implements EngineClient {
   }
 
   async probe(graph: GraphSpec, node: string, frames: number): Promise<ProbeWindow> {
-    const missing = missingUpstream(graph, node);
-    if (missing.length > 0) throw error("invalid", `the graph has ${missing.length} error(s)`, missing);
+    const issues = upstreamIssues(graph, node);
+    if (issues.length > 0) throw error("invalid", `the graph has ${issues.length} error(s)`, issues);
     const start = this.playing ? this.frame() : 0;
     return {
       node,
@@ -105,6 +121,11 @@ export class MockEngine implements EngineClient {
       sample_rate_hz: INFO.sample_rate_hz,
       samples: render(graph, node, start, frames),
     };
+  }
+
+  async scope(graph: GraphSpec, node: string, seconds: number): Promise<ScopeWindow> {
+    const start = this.playing ? this.frame() : 0;
+    return this.renderScope({ graph, node, start, seconds });
   }
 
   async level(frames: number): Promise<LevelReading | null> {
@@ -137,6 +158,36 @@ export class MockEngine implements EngineClient {
   }
 }
 
+/** The browser runs long windows in a worker. Unit tests use the same renderer directly. */
+export function renderMockScope({ graph, node, start, seconds }: MockScopeRequest): ScopeWindow {
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 4) {
+    throw error("engine", "scope duration must be greater than 0 and at most 4 seconds");
+  }
+  const issues = upstreamIssues(graph, node);
+  if (issues.length > 0) throw error("invalid", `the graph has ${issues.length} error(s)`, issues);
+  const rate = INFO.sample_rate_hz;
+  const frames = Math.max(1, Math.round(seconds * rate));
+  const envelope = graph.nodes.find((candidate) => candidate.id === node)?.kind === "envelope";
+  const gateId = envelope ? envelopeGate(graph, node) : undefined;
+  const warmup = envelope ? Math.min(start, 2 * rate) : 0;
+  const samples = render(graph, node, start - warmup, warmup + frames).slice(warmup);
+  const gateSamples = gateId ? render(graph, gateId, start - warmup, warmup + frames).slice(warmup) : null;
+  const bucket = envelope ? Math.ceil(rate / 100) : Math.ceil(frames / 1000);
+  const bands: ScopeWindow["bands"] = [];
+  for (let begin = 0; begin < frames; begin += bucket) {
+    const end = Math.min(begin + bucket, frames);
+    let min = 1;
+    let max = -1;
+    for (let n = begin; n < end; n++) {
+      min = Math.min(min, samples[n]);
+      max = Math.max(max, samples[n]);
+    }
+    bands.push([min, max]);
+  }
+  const gate = gateSamples && scopeGate(gateSamples, bucket);
+  return { start_frame: start, sample_rate_hz: rate, frames, bucket_frames: bucket, bands, gate };
+}
+
 function error(kind: CommandError["kind"], message: string, issues: GraphIssue[] = []): CommandError {
   return { kind, message, issues };
 }
@@ -162,6 +213,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in"];
     case "low_pass":
       return ["in"];
+    case "envelope":
+      return ["in", "gate"];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -169,8 +222,22 @@ function inputNames(node: NodeSpec): string[] {
   }
 }
 
-/** Required inputs left open in `node` or anything feeding it, as the host reports them. */
-function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
+function envelopeParamIssues(node: NodeSpec): GraphIssue[] {
+  if (node.kind !== "envelope") return [];
+  const issues: GraphIssue[] = [];
+  for (const name of ["attack_seconds", "decay_seconds", "sustain_level", "release_seconds"]) {
+    const value = node.params[name];
+    const sustain = name === "sustain_level";
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || (sustain && value > 1)) {
+      const message = sustain ? "sustain must be between 0 and 1" : `${name.split("_")[0]} must be a finite nonnegative time`;
+      issues.push({ ...issue("invalid_parameter", node.id, message), param: name });
+    }
+  }
+  return issues;
+}
+
+/** Unwired inputs and invalid envelope settings in the selected branch. */
+function upstreamIssues(graph: GraphSpec, node: string): GraphIssue[] {
   const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
   const issues: GraphIssue[] = [];
   const seen = new Set<string>();
@@ -181,6 +248,7 @@ function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
     seen.add(id);
     const spec = graph.nodes.find((candidate) => candidate.id === id);
     if (!spec) continue;
+    issues.push(...envelopeParamIssues(spec));
     for (const port of inputNames(spec)) {
       const from = feeds.get(`${id}:${port}`);
       if (from) pending.push(from);
@@ -238,11 +306,13 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
         issues.push({ ...issue("invalid_parameter", node.id, `${name === "cutoff_hz" ? "cutoff" : "frequency"} must be below Nyquist (24000 Hz at 48000 Hz)`), param: name });
       }
     }
+    const severity: GraphIssue["severity"] = reachable.has(node.id) ? "error" : "warning";
+    issues.push(...envelopeParamIssues(node).map((problem) => ({ ...problem, severity })));
   }
   return issues;
 }
 
-/** A rough stateless model of the engine's nodes; good enough to draw. */
+/** A rough model of the engine's nodes for drawing a probe. */
 function render(graph: GraphSpec, root: string, start: number, frames: number): number[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
@@ -261,6 +331,11 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     const baseHz = Number(node?.params.frequency_hz ?? 0);
     let sawPhase = (start * baseHz / INFO.sample_rate_hz) % 1;
     const p = (name: string) => Number(node?.params[name] ?? 0);
+    if (node?.kind === "envelope") {
+      const samples = envelopeSamples(input("in"), input("gate"), node.params);
+      cache.set(id, samples);
+      return samples;
+    }
     const noiseKey = mix32(seeds.get(id) ?? 0);
     const wetRatio = Number(node?.params.wet ?? node?.params.mix ?? 1);
     let wet = 0;
@@ -313,6 +388,82 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     return out;
   };
   return Array.from(signal(root));
+}
+
+function scopeGate(samples: readonly number[], bucket: number): ScopeGate {
+  const start_open = samples[0] > 0;
+  const transitions: number[] = [];
+  let open = start_open;
+  for (let i = 1; i < samples.length; i++) {
+    const nextOpen = samples[i] > 0;
+    if (open === nextOpen) continue;
+    open = nextOpen;
+    transitions.push(i);
+    if (transitions.length > MAX_SCOPE_GATE_TRANSITIONS) break;
+  }
+  if (transitions.length <= MAX_SCOPE_GATE_TRANSITIONS) return { kind: "edges", start_open, transitions };
+
+  const states: ("closed" | "open" | "mixed")[] = [];
+  for (let begin = 0; begin < samples.length; begin += bucket) {
+    const end = Math.min(begin + bucket, samples.length);
+    const firstOpen = samples[begin] > 0;
+    let state: (typeof states)[number] = firstOpen ? "open" : "closed";
+    for (let i = begin + 1; i < end; i++) {
+      if ((samples[i] > 0) !== firstOpen) {
+        state = "mixed";
+        break;
+      }
+    }
+    states.push(state);
+  }
+  return { kind: "bands", states };
+}
+
+function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSpec["params"]): Float32Array {
+  type Stage = "attack" | "decay" | "sustain" | "release" | "idle";
+  const frames = (name: string) => Math.ceil(Number(params[name]) * INFO.sample_rate_hz);
+  const attack = Number(params.attack_seconds) * INFO.sample_rate_hz;
+  const decay = frames("decay_seconds");
+  const sustain = Number(params.sustain_level);
+  const release = frames("release_seconds");
+  let open = false;
+  let level = 0;
+  let initial = 0;
+  let elapsed = 0;
+  let stage: Stage = "idle";
+
+  const enter = (next: Stage) => {
+    stage = next;
+    initial = level;
+    elapsed = 0;
+  };
+  return audio.map((sample, index) => {
+    const nextOpen = gate[index] > 0;
+    if (nextOpen !== open) {
+      open = nextOpen;
+      enter(open ? "attack" : "release");
+    }
+    while (stage !== "idle" && stage !== "sustain") {
+      const attackDuration = initial === 1 ? 0 : attack * (1 - initial);
+      const duration = stage === "attack" ? attackDuration : stage === "decay" ? decay : release;
+      const target = stage === "attack" ? 1 : stage === "decay" ? sustain : 0;
+      const next = stage === "attack" ? "decay" : stage === "decay" ? "sustain" : "idle";
+      if (duration === 0) {
+        level = target;
+        enter(next);
+        continue;
+      }
+      elapsed += 1;
+      if (elapsed >= duration) {
+        level = target;
+        enter(next);
+      } else {
+        level = initial + (target - initial) * (elapsed / duration);
+      }
+      break;
+    }
+    return sample * level;
+  });
 }
 
 function noiseSeeds(nodes: ReadonlyMap<string, NodeSpec>): Map<string, number> {

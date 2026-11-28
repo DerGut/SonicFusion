@@ -66,6 +66,34 @@ deterministic per source and absolute frame, independent of render batch size.
 An optional unsigned 32-bit seed, `noise(seed)`, fixes a particular sequence.
 The editor assigns a seed from the node ID when lowering or exporting a patch.
 
+### ADSR envelope
+
+`envelope($audio, $gate, attack, decay, sustain, release)` multiplies the
+audio by a linear ADSR envelope. The audio can also be piped into the envelope:
+
+```text
+square(2, 0.5) -> $gate;
+sine(220) -> envelope($gate, 0.01, 0.2, 0.7, 0.3) -> gain(0.08) -> out
+```
+
+Attack, decay, and release are finite, nonnegative seconds. Sustain is a level
+between 0 and 1. The gate opens for positive samples and closes at zero or
+below. An opening edge starts attack from the current level. Attack sets a
+rate: from zero it takes A seconds to reach 1, and from 0.8 it takes 0.2 × A.
+A held gate decays to sustain over D seconds. A closing edge releases from
+the current level over R seconds. Every ramp advances on its first frame.
+Zero-duration stages take no frames. Each execution starts with the gate
+closed, including after a live graph replacement.
+
+In the editor, connect audio to **in** and a slow square oscillator to
+**Gate**. The duration sliders cover 1 ms to 10 s logarithmically. Typed
+values and DSL still accept any finite nonnegative duration, including zero.
+The slow scope shows two periods for a directly connected fixed-rate
+oscillator, within 250 ms to 4 s, and uses a 1 s window for other gates.
+The dashed gate marks transitions at their frame offsets. For dense gates,
+shading marks 10 ms intervals that contain both gate states. The scope
+approximates live history with a bounded warm-up.
+
 ## Direct playback
 
 ```sh

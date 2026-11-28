@@ -1,3 +1,5 @@
+mod aligned;
+mod envelope;
 mod gain;
 mod low_pass_filter;
 mod mix;
@@ -7,6 +9,7 @@ mod sine;
 mod square;
 mod white_noise;
 
+pub use envelope::{Adsr, FrameEnvelopeExec};
 pub use gain::FrameGainExec;
 pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass, low_pass_with_mix};
 pub(crate) use low_pass_filter::{validate_constant_cutoff, validate_mix as validate_low_pass_mix};
@@ -20,15 +23,26 @@ pub use white_noise::FrameWhiteNoiseExec;
 
 /// Frame signals carry finite, unitless bipolar samples in [-1, 1].
 fn validate_sample(sample: f32, frame: u64, source: &str) -> datafusion::error::Result<()> {
+    validate_sample_from(sample, frame, || source)
+}
+
+/// Keep error context lazy for processors that name either of their inputs.
+fn validate_sample_from<S: std::fmt::Display>(
+    sample: f32,
+    frame: u64,
+    source: impl FnOnce() -> S,
+) -> datafusion::error::Result<()> {
     use datafusion::error::DataFusionError;
     if !sample.is_finite() {
         return Err(DataFusionError::Execution(format!(
-            "{source} non-finite sample at frame {frame}: {sample}"
+            "{} non-finite sample at frame {frame}: {sample}",
+            source()
         )));
     }
     if !(-1.0..=1.0).contains(&sample) {
         return Err(DataFusionError::Execution(format!(
-            "{source} out-of-range sample at frame {frame}: {sample}"
+            "{} out-of-range sample at frame {frame}: {sample}",
+            source()
         )));
     }
     Ok(())

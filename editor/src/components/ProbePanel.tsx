@@ -1,18 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { EngineClient } from "../api/client";
-import { type GraphSpec, type ProbeWindow, type SessionInfo, isCommandError } from "../api/types";
+import { type GraphSpec, type ProbeWindow, type ScopeWindow, type SessionInfo, isCommandError } from "../api/types";
 import type { DocNode } from "../model/document";
 import { noteName, pitchFromHz } from "../model/pitch";
-import { formatDb, formatHz, spectrumDb, strongestPartial, triggerIndex } from "../model/signal";
+import { slowScopeSeconds } from "../model/scope";
+import { formatDb, formatHz, formatSeconds, spectrumDb, strongestPartial, triggerIndex } from "../model/signal";
 import { describe } from "../state/useEngineSession";
 import { Icon } from "./icons";
 import { NodeTitle } from "./NodeTitle";
+import { SlowScope } from "./SlowScope";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
 const IDLE_DEBOUNCE_MS = 150;
 const SCOPE_SECONDS = 0.02;
+
+type Preview = { kind: "short"; window: ProbeWindow } | { kind: "slow"; seconds: number; window: ScopeWindow };
 
 /**
  * Scope and spectrum of the selected node. The engine recomputes the node's
@@ -31,7 +35,9 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
   onClose: () => void;
 }) {
   const [view, setView] = useState<"scope" | "spectrum">("scope");
-  const [probe, setProbe] = useState<ProbeWindow | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const inFlight = useRef<Promise<Preview> | null>(null);
+  const slowSeconds = view === "scope" ? slowScopeSeconds(graph, node) : null;
   /** Why there is no signal: an unfinished branch is normal while editing. */
   const [unavailable, setUnavailable] = useState<{ text: string; problem: boolean } | null>(null);
   const graphJson = JSON.stringify(graph);
@@ -40,32 +46,47 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     // One probe at a time; while playing, the next starts after the last returns.
-    const run = () =>
-      client
-        .probe(JSON.parse(graphJson) as GraphSpec, node.id, PROBE_FRAMES)
-        .then((result) => {
-          if (cancelled) return;
-          setProbe(result);
-          setUnavailable(null);
-        })
-        .catch((reason) => {
-          if (cancelled) return;
-          setProbe(null);
-          setUnavailable(whyUnavailable(reason));
-        })
-        .finally(() => {
-          if (!cancelled && playing) timer = setTimeout(run, LIVE_INTERVAL_MS);
-        });
+    setUnavailable(null);
+    const run = async () => {
+      // A draft or tab change can rerun this effect while a previous command is
+      // still rendering. Let it finish before sending another window to the host.
+      if (inFlight.current) await inFlight.current.catch(() => {});
+      if (cancelled) return;
+      const draft = JSON.parse(graphJson) as GraphSpec;
+      const request: Promise<Preview> = slowSeconds === null
+        ? client.probe(draft, node.id, PROBE_FRAMES).then((window) => ({ kind: "short", window }))
+        : client.scope(draft, node.id, slowSeconds).then((window) => ({ kind: "slow", seconds: slowSeconds, window }));
+      inFlight.current = request;
+      try {
+        const result = await request;
+        if (cancelled) return;
+        setPreview(result);
+        setUnavailable(null);
+      } catch (reason) {
+        if (cancelled) return;
+        setPreview(null);
+        setUnavailable(whyUnavailable(reason));
+      } finally {
+        if (inFlight.current === request) inFlight.current = null;
+        if (!cancelled && playing) timer = setTimeout(run, LIVE_INTERVAL_MS);
+      }
+    };
     timer = setTimeout(run, playing ? 0 : IDLE_DEBOUNCE_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [client, graphJson, node.id, playing]);
+  }, [client, graphJson, node.id, playing, slowSeconds]);
 
+  const probe = slowSeconds === null && preview?.kind === "short" ? preview.window : null;
+  const slow = preview?.kind === "slow" && preview.seconds === slowSeconds ? preview.window : null;
+  const displayed = probe ?? slow;
   const samples = useMemo(() => probe?.samples ?? [], [probe]);
-  const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
-  const rate = probe?.sample_rate_hz ?? session.sample_rate_hz;
+  const peak = slow
+    ? slow.bands.reduce((peak, [min, max]) => Math.max(peak, -min, max), 0)
+    : samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
+  const rate = displayed?.sample_rate_hz ?? session.sample_rate_hz;
+  const slowFrames = slow?.frames ?? (slowSeconds === null ? 0 : Math.round(slowSeconds * rate));
   const spectrum = useMemo(() => (samples.length === PROBE_FRAMES ? spectrumDb(samples) : []), [samples]);
   const partial = strongestPartial(spectrum, rate);
   const partialPitch = view === "spectrum" && partial?.canNamePitch ? pitchFromHz(partial.hz) : null;
@@ -91,8 +112,8 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
         </div>
         {draft && <span className="draft-tag" title="The probe follows your edits; the meter follows what is playing">draft, not applied</span>}
         <span className="hint">
-          {probe
-            ? `rendered by the ${client.live ? "engine" : "mock engine"} at frame ${probe.start_frame} · drawn here`
+          {displayed
+            ? `rendered by the ${client.live ? "engine" : "mock engine"} at frame ${displayed.start_frame} · drawn here`
             : unavailable
               ? "no signal"
               : "probing…"}
@@ -105,17 +126,23 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
           {unavailable ? (
             <p className={`plot-message${unavailable.problem ? " error" : ""}`}>{unavailable.text}</p>
           ) : view === "scope" ? (
-            <Scope samples={samples} rate={rate} />
+            slowSeconds === null ? <Scope samples={samples} rate={rate} /> : slow && <SlowScope scope={slow} />
           ) : (
             <Spectrum spectrum={spectrum} rate={rate} cutoff={cutoff} />
           )}
           <span className="plot-label">
-            {view === "scope" ? `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled` : "dBFS · 20 Hz – 20 kHz · log"}
+            {view === "scope"
+              ? slowSeconds === null
+                ? `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
+                : node.kind === "envelope"
+                  ? `${formatSeconds(slowFrames / rate)} · ${slow?.gate?.kind === "bands" ? "mixed gate shaded" : "gate dashed"} · peak per 10 ms`
+                  : `${formatSeconds(slowFrames / rate)} · waveform`
+              : "dBFS · 20 Hz – 20 kHz · log"}
           </span>
         </div>
         <dl className="readouts">
-          <div><dt>Peak</dt><dd>{probe ? `${formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS` : "—"}</dd></div>
-          <div>
+          <div><dt>Peak</dt><dd>{displayed ? `${formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS` : "—"}</dd></div>
+          <div hidden={slowSeconds !== null}>
             <dt>Strongest partial</dt>
             <dd>{partialLabel}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
           </div>
@@ -126,7 +153,7 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
             </div>
           )}
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
-          <div><dt>Window</dt><dd>{PROBE_FRAMES} frames</dd></div>
+          <div><dt>Window</dt><dd>{slowSeconds === null ? PROBE_FRAMES : slowFrames} frames</dd></div>
         </dl>
       </div>
     </section>

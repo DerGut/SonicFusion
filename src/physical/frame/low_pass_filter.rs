@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use datafusion::{
     arrow::{
-        array::{Array, Float32Array, RecordBatch, UInt64Array},
+        array::{Float32Array, RecordBatch},
         datatypes::SchemaRef,
     },
     error::{DataFusionError, Result},
@@ -17,7 +17,10 @@ use futures::StreamExt;
 
 use crate::{ExecutionConfig, layout::frame::frame_schema};
 
-use super::plan::FramePlan;
+use super::{
+    aligned::{AudioBatch, DenseControlCursor},
+    plan::FramePlan,
+};
 
 /// Selects a fixed cutoff or a normalized frame signal to map to hertz.
 pub enum Cutoff {
@@ -154,56 +157,6 @@ enum CutoffState {
     },
 }
 
-struct AudioBatch<'a> {
-    frames: &'a UInt64Array,
-    samples: &'a Float32Array,
-}
-
-impl<'a> AudioBatch<'a> {
-    fn new(batch: &'a RecordBatch, schema: &SchemaRef) -> Result<Self> {
-        if batch.schema() != *schema {
-            return Err(DataFusionError::Execution(
-                "FrameLowPassFilterExec received an incompatible audio batch schema".into(),
-            ));
-        }
-        let frames = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| DataFusionError::Execution("expected UInt64 audio frames".into()))?;
-        let samples = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<Float32Array>()
-            .ok_or_else(|| DataFusionError::Execution("expected Float32 audio samples".into()))?;
-        Ok(Self { frames, samples })
-    }
-
-    fn row(&self, row: usize, last_frame: Option<u64>, start_frame: u64) -> Result<(u64, f32)> {
-        if self.frames.is_null(row) || self.samples.is_null(row) {
-            return Err(DataFusionError::Execution(
-                "FrameLowPassFilterExec received a null audio frame or sample".into(),
-            ));
-        }
-        let frame = self.frames.value(row);
-        if frame < start_frame {
-            return Err(DataFusionError::Execution(format!(
-                "FrameLowPassFilterExec input frame {frame} precedes execution origin {start_frame}"
-            )));
-        }
-        if let Some(last) = last_frame
-            && frame <= last
-        {
-            return Err(DataFusionError::Execution(format!(
-                "FrameLowPassFilterExec input frames must increase: {frame} follows {last}"
-            )));
-        }
-        let sample = self.samples.value(row);
-        super::validate_sample(sample, frame, "FrameLowPassFilterExec input")?;
-        Ok((frame, sample))
-    }
-}
-
 impl FrameLowPassFilterExec {
     pub fn try_new(
         config: &impl AsRef<ExecutionConfig>,
@@ -326,7 +279,7 @@ impl FrameLowPassFilterExec {
         let mix = self.mix;
         let stream = self.input.execute(partition, context)?.map(move |batch| {
             let batch = batch?;
-            let audio = AudioBatch::new(&batch, &schema)?;
+            let audio = AudioBatch::new(&batch, &schema, "FrameLowPassFilterExec")?;
 
             let mut filtered = Vec::with_capacity(batch.num_rows());
             for row in 0..batch.num_rows() {
@@ -373,7 +326,12 @@ impl FrameLowPassFilterExec {
         let schema = self.schema();
         let mut audio = self.input.execute(partition, Arc::clone(&context))?;
         let modulation = cutoff.execute(partition, context)?;
-        let mut cursor = ModulationCursor::new(modulation, Arc::clone(&schema));
+        let mut cursor = DenseControlCursor::new(
+            modulation,
+            Arc::clone(&schema),
+            "FrameLowPassFilterExec",
+            "modulation",
+        );
         let start_frame = self.start_frame;
         let mix = self.mix;
         let output = async_stream::try_stream! {
@@ -383,7 +341,7 @@ impl FrameLowPassFilterExec {
 
             while let Some(batch) = audio.next().await {
                 let batch = batch?;
-                let audio_batch = AudioBatch::new(&batch, &schema)?;
+                let audio_batch = AudioBatch::new(&batch, &schema, "FrameLowPassFilterExec")?;
                 let mut filtered = Vec::with_capacity(batch.num_rows());
 
                 for row in 0..batch.num_rows() {
@@ -532,87 +490,6 @@ impl ExecutionPlan for FrameLowPassFilterExec {
                 *sample_rate_hz,
             ),
         }
-    }
-}
-
-struct ModulationBatch {
-    frames: UInt64Array,
-    samples: Float32Array,
-}
-
-impl ModulationBatch {
-    fn new(batch: RecordBatch, schema: &SchemaRef) -> Result<Self> {
-        if batch.schema() != *schema {
-            return Err(DataFusionError::Execution(
-                "FrameLowPassFilterExec received an incompatible modulation batch schema".into(),
-            ));
-        }
-        let frames = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| DataFusionError::Execution("expected UInt64 modulation frames".into()))?
-            .clone();
-        let samples = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<Float32Array>()
-            .ok_or_else(|| {
-                DataFusionError::Execution("expected Float32 modulation samples".into())
-            })?
-            .clone();
-        Ok(Self { frames, samples })
-    }
-}
-
-/// Reads only the modulation rows demanded by the audio child, across batches.
-struct ModulationCursor {
-    stream: SendableRecordBatchStream,
-    schema: SchemaRef,
-    batch: Option<ModulationBatch>,
-    row: usize,
-}
-
-impl ModulationCursor {
-    fn new(stream: SendableRecordBatchStream, schema: SchemaRef) -> Self {
-        Self {
-            stream,
-            schema,
-            batch: None,
-            row: 0,
-        }
-    }
-
-    async fn next_sample(&mut self, expected: u128) -> Result<f32> {
-        while self
-            .batch
-            .as_ref()
-            .is_none_or(|batch| self.row == batch.frames.len())
-        {
-            let Some(batch) = self.stream.next().await.transpose()? else {
-                return Err(DataFusionError::Execution(format!(
-                    "FrameLowPassFilterExec modulation expected frame {expected}, got end of stream"
-                )));
-            };
-            self.batch = Some(ModulationBatch::new(batch, &self.schema)?);
-            self.row = 0;
-        }
-        let batch = self.batch.as_ref().unwrap();
-        if batch.frames.is_null(self.row) || batch.samples.is_null(self.row) {
-            return Err(DataFusionError::Execution(format!(
-                "FrameLowPassFilterExec modulation expected frame {expected}, got null frame or sample"
-            )));
-        }
-        let observed = batch.frames.value(self.row);
-        if u128::from(observed) != expected {
-            return Err(DataFusionError::Execution(format!(
-                "FrameLowPassFilterExec modulation expected frame {expected}, got {observed}"
-            )));
-        }
-        let sample = batch.samples.value(self.row);
-        super::validate_sample(sample, observed, "FrameLowPassFilterExec modulation")?;
-        self.row += 1;
-        Ok(sample)
     }
 }
 

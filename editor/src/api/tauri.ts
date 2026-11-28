@@ -9,6 +9,7 @@ import type {
   NodeDescriptor,
   ProbeWindow,
   RevisionEvent,
+  ScopeWindow,
   SessionEnded,
   SessionInfo,
   Started,
@@ -48,6 +49,10 @@ export class TauriEngine implements EngineClient {
 
   probe(graph: GraphSpec, node: string, frames: number) {
     return invoke<ProbeWindow>("probe", { graph, node, frames });
+  }
+
+  scope(graph: GraphSpec, node: string, seconds: number) {
+    return invoke<ScopeWindow>("scope", { graph, node, seconds });
   }
 
   level(frames: number) {
