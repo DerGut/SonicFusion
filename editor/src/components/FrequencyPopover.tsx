@@ -1,15 +1,16 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { DETUNE_STEP, detuneBounds, formatCents, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type Pitch } from "../model/pitch";
+import { DETUNE_STEP, detuneBounds, formatCents, hzToBpm, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type FrequencyMode, type Pitch } from "../model/pitch";
 import { ParameterRange } from "./ParameterRange";
 
 const WHITE_KEYS_PER_OCTAVE = 7;
 const BLACK_KEY_BOUNDARY: Record<number, number> = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 };
+const FREQUENCY_MODES = [["hz", "Hz"], ["note", "Note"], ["bpm", "BPM"]] as const;
 const octaveOf = (midi: number) => Math.floor(midi / 12) - 1;
 
-export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, onClose, onBeginContinuous,
-  onFrequency, onPitch }: {
+export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mode, onModeChange, onClose,
+  onBeginContinuous, onFrequency, onPitch }: {
   id: string;
   anchor: RefObject<HTMLButtonElement | null>;
   label: string;
@@ -17,6 +18,8 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   pitch: Pitch | null;
   min: number;
   max: number;
+  mode: FrequencyMode;
+  onModeChange?: (mode: FrequencyMode) => void;
   onClose: () => void;
   onBeginContinuous: () => void;
   onFrequency: (hz: number) => void;
@@ -26,6 +29,8 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   const exact = useRef<HTMLInputElement>(null);
   const [text, setText] = useState<string | null>(null);
   const pendingText = useRef<string | null>(null);
+  const bpm = mode === "bpm";
+  const exactValue = String(bpm ? hzToBpm(value) : value);
   const [browsedOctave, setBrowsedOctave] = useState<number | null>(null);
   const floorHz = Math.max(min, PITCH_FLOOR_HZ);
   const detune = pitch && detuneBounds(pitch.midi, floorHz, max);
@@ -40,9 +45,9 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
   const commit = (report: boolean) => {
     const draft = pendingText.current;
     if (draft === null) return;
-    const hz = draft.trim() ? parseFrequency(draft) : NaN;
+    const hz = draft === exactValue ? value : draft.trim() ? parseFrequency(draft, mode) : NaN;
     if (!Number.isFinite(hz) && report) {
-      exact.current?.setCustomValidity("Enter a frequency in Hz or a note such as C#4.");
+      exact.current?.setCustomValidity(bpm ? "Enter a number in BPM." : "Enter a frequency in Hz or a note such as C#4.");
       exact.current?.reportValidity();
       return;
     }
@@ -112,7 +117,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
         }
       }}>
       <div className="frequency-popover-head">
-        {pitch ? (
+        {pitch && !bpm ? (
           <>
             <button type="button" aria-label="Octave down" disabled={octave <= lowestOctave}
               onClick={() => setBrowsedOctave(octave - 1)}>‹</button>
@@ -124,7 +129,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
         <button type="button" className="frequency-popover-close" aria-label="Close frequency editor"
           onClick={closeAndFocus}>×</button>
       </div>
-      {pitch && (
+      {pitch && !bpm && (
         <>
           <div className="frequency-keys" role="group" aria-label="Note keyboard">
             {Array.from({ length: 24 }, (_, index) => {
@@ -161,12 +166,24 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, on
           )}
         </>
       )}
+      {onModeChange && (
+        <div className="frequency-unit" role="radiogroup" aria-label="Frequency unit">
+          <span aria-hidden="true">Frequency unit</span>
+          {FREQUENCY_MODES.map(([unit, name]) => (
+            <label key={unit}>
+              <input type="radio" name={id + "-unit"} checked={mode === unit} disabled={unit === "note" && !pitch}
+                onChange={() => onModeChange(unit)} />
+              {name}
+            </label>
+          ))}
+        </div>
+      )}
       <form className="frequency-exact" onSubmit={(event) => {
         event.preventDefault();
         commit(true);
       }}>
-        <label htmlFor={id + "-exact"}>Hz or note</label>
-        <input id={id + "-exact"} ref={exact} className="value-input nodrag" value={text ?? String(value)}
+        <label htmlFor={id + "-exact"}>{bpm ? "BPM" : "Hz or note"}</label>
+        <input id={id + "-exact"} ref={exact} className="value-input nodrag" value={text ?? exactValue}
           onFocus={(event) => event.currentTarget.select()} onBlur={() => commit(false)} onChange={(event) => {
             event.currentTarget.setCustomValidity("");
             updateText(event.currentTarget.value);

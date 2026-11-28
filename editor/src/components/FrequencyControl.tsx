@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import type { ParamDescriptor } from "../api/types";
-import { defaultFrequencyMode, PITCH_FLOOR_HZ, noteName, pitchFromHz, pitchToHz, snapSliderHz, type FrequencyMode, type Pitch } from "../model/pitch";
+import { defaultFrequencyMode, hzToBpm, PITCH_FLOOR_HZ, noteName, pitchFromHz, pitchToHz, snapSliderHz, type FrequencyMode, type Pitch } from "../model/pitch";
 import { formatHz } from "../model/signal";
 import { FrequencyPopover } from "./FrequencyPopover";
 import { fromSlider, SLIDER_STEPS, toSlider } from "./ParamControl";
@@ -37,11 +37,20 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, f
   const [reference, setReference] = useState<number>();
   const defaultMode = defaultFrequencyMode(value, feedsControl);
   const pitch = value >= PITCH_FLOOR_HZ ? pitchFromHz(value, reference) : null;
-  const noteLed = pitch !== null && (override ?? defaultMode) === "note";
-  const unit = noteLed ? "Hz" : "Note";
-  const label = noteLed && descriptor.frequency === "pitch" ? "Pitch" : descriptor.label;
-  const primary = noteLed ? compactPitch(pitch) : value > 0 && value < 0.01 ? compactHz(value) : formatHz(value);
-  const secondary = pitch && (noteLed ? compactHz(value) : (Math.abs(pitch.cents) < 0.5 ? "" : "≈") + noteName(pitch.midi));
+  const supportsBpm = descriptor.frequency === "pitch";
+  const requestedMode = override === "bpm" && !supportsBpm ? defaultMode : override ?? defaultMode;
+  const bpmLed = requestedMode === "bpm";
+  const noteLed = pitch !== null && requestedMode === "note";
+  const mode = bpmLed ? "bpm" : noteLed ? "note" : "hz";
+  const nextMode = noteLed || bpmLed ? "hz" : "note";
+  const nextUnit = nextMode === "hz" ? "Hz" : "Note";
+  const label = noteLed && supportsBpm ? "Pitch" : descriptor.label;
+  const primary = bpmLed ? Number(hzToBpm(value).toPrecision(5)) + " BPM"
+    : noteLed ? compactPitch(pitch)
+    : value > 0 && value < 0.01 ? compactHz(value) : formatHz(value);
+  const secondary = noteLed || bpmLed ? compactHz(value)
+    : pitch && (Math.abs(pitch.cents) < 0.5 ? "" : "≈") + noteName(pitch.midi);
+  const selectMode = (next: FrequencyMode) => onOverride(next === defaultMode ? undefined : next);
   // The controls use the catalog's editing range and the device's strict Nyquist limit.
   const max = Math.min(descriptor.max, sampleRate / 2 * (1 - Number.EPSILON));
   const range = { ...descriptor, max };
@@ -59,16 +68,13 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, f
           <button type="button" className="value nodrag" ref={anchor}
             aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id + "-editor" : undefined}
             aria-label={descriptor.label + ": " + primary + ". Edit value"}
-            title="Edit Hz or enter a note" onClick={() => setOpen(!open)}>
+            title={supportsBpm ? "Edit Hz, notes, or BPM" : "Edit Hz or enter a note"} onClick={() => setOpen(!open)}>
             {primary}
           </button>
           {secondary ? (
             <button type="button" className={`frequency-swap nodrag${override ? " overridden" : ""}`}
-              aria-label={"Lead with " + unit} title={"Lead with " + unit + (override ? " (display override)" : "")}
-              onClick={() => {
-                const next = noteLed ? "hz" : "note";
-                onOverride(next === defaultMode ? undefined : next);
-              }}>
+              aria-label={"Lead with " + nextUnit} title={"Lead with " + nextUnit + (override ? " (display override)" : "")}
+              onClick={() => selectMode(nextMode)}>
               {secondary}
             </button>
           ) : value >= 0 && value < PITCH_FLOOR_HZ ? <span className="frequency-secondary">rate</span> : null}
@@ -81,7 +87,8 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, f
           onChange(snapSliderHz(value, descriptor.min, max, direction), true);
         } : undefined} />
       {open && <FrequencyPopover id={id + "-editor"} anchor={anchor} label={descriptor.label}
-        value={value} pitch={pitch} min={descriptor.min} max={max}
+        value={value} pitch={pitch} min={descriptor.min} max={max} mode={mode}
+        onModeChange={supportsBpm ? selectMode : undefined}
         onClose={close} onBeginContinuous={onBeginContinuous}
         onFrequency={(hz) => {
           setReference(undefined);

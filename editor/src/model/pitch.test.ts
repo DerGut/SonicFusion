@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultFrequencyMode, detuneBounds, formatCents, noteName, parseFrequency, pitchFromHz, pitchToHz, snapSliderHz } from "./pitch";
+import { defaultFrequencyMode, detuneBounds, formatCents, hzToBpm, noteName, parseFrequency, pitchFromHz, pitchToHz, snapSliderHz } from "./pitch";
 
 describe("frequency and pitch", () => {
   it("defaults audible audio signals to notes and control or subaudio signals to Hz", () => {
@@ -30,6 +30,17 @@ describe("frequency and pitch", () => {
     expect(pitchToHz({ midi: low, cents: nearFloor.min })).toBeGreaterThanOrEqual(20);
     expect(detuneBounds(69, 20, 20_000)).toEqual({ min: -50, max: 50 });
     expect(detuneBounds(pitchFromHz(24_500)!.midi, 20, 20_000)).toBeNull();
+  });
+
+  it("converts BPM entry to Hz without changing Hz or note entry", () => {
+    expect(parseFrequency("120", "bpm")).toBe(2);
+    expect(parseFrequency(" 0.6 bpm ", "bpm")).toBe(0.01);
+    expect(parseFrequency("0", "bpm")).toBe(0);
+    expect(parseFrequency("BPM", "bpm")).toBeNaN();
+    expect(parseFrequency("120 BPM")).toBeNaN();
+    expect(parseFrequency("120", "note")).toBe(120);
+    expect(parseFrequency("A4", "note")).toBe(440);
+    expect(hzToBpm(2)).toBe(120);
   });
 
   it("uses A4 = 440 Hz and C4 = MIDI 60", () => {

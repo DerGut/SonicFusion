@@ -284,7 +284,7 @@ export function parseDocument(text: string): EditorDocument {
       typeof position?.y !== "number" ||
       !Number.isFinite(position.x) ||
       !Number.isFinite(position.y) ||
-      (candidate.frequencyMode !== undefined && candidate.frequencyMode !== "hz" && candidate.frequencyMode !== "note")
+      (candidate.frequencyMode !== undefined && candidate.frequencyMode !== "hz" && candidate.frequencyMode !== "note" && candidate.frequencyMode !== "bpm")
     ) {
       throw new Error("project has a malformed node");
     }

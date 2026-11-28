@@ -1,6 +1,8 @@
 export const PITCH_FLOOR_HZ = 20;
 export const DETUNE_STEP = 0.1;
-export type FrequencyMode = "hz" | "note";
+export type FrequencyMode = "hz" | "note" | "bpm";
+
+const SECONDS_PER_MINUTE = 60;
 
 const A4_HZ = 440;
 const A4_MIDI = 69;
@@ -69,8 +71,16 @@ export function formatCents(cents: number): string {
   return (rounded > 0 ? "+" : "") + rounded + "¢";
 }
 
-/** Numeric input remains Hz in either mode. Notes can include an explicit cents offset. */
-export function parseFrequency(text: string): number {
+export function hzToBpm(hz: number): number {
+  return hz * SECONDS_PER_MINUTE;
+}
+
+/** Bare numbers are Hz except in BPM mode. Note names can include a cents offset. */
+export function parseFrequency(text: string, mode: FrequencyMode = "hz"): number {
+  if (mode === "bpm") {
+    const bpm = text.trim().replace(/\s*bpm$/i, "");
+    return bpm ? Number(bpm) / SECONDS_PER_MINUTE : NaN;
+  }
   const match = /^([A-G])([#b♯♭]?)(-?\d+)(?:\s*([+-]\d+(?:\.\d+)?)\s*[c¢])?$/i.exec(text.trim());
   if (!match) return Number(text);
   const [, letter, accidental, octave, detune] = match;
