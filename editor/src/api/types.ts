@@ -11,7 +11,9 @@ export type NodeKind =
   | "low_pass"
   | "mix"
   | "envelope"
-  | "output";
+  | "output"
+  // PROTOTYPE oscillator pitch
+  | "melody";
 
 export type ParamValue = number | number[];
 

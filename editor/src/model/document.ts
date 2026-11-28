@@ -115,7 +115,12 @@ export function addConnectedNode(
   const [added, id] = addNode(doc, catalog, kind, position);
   const node = added.nodes.find((candidate) => candidate.id === id)!;
   const ports = inputPorts(node, catalog);
-  const first = ports.find((port) => port.signal === "audio") ?? (ports.length === 1 ? ports[0] : undefined);
+  // PROTOTYPE oscillator pitch: with both Note and FM, note sources go to Note and everything else to FM.
+  const source = doc.nodes.find((candidate) => candidate.id === from);
+  const pitchPort = ports.some((port) => port.name === "note") && ports.some((port) => port.name === "frequency")
+    ? ports.find((port) => port.name === (source?.kind === "melody" ? "note" : "frequency"))
+    : undefined;
+  const first = ports.find((port) => port.signal === "audio") ?? pitchPort ?? (ports.length === 1 ? ports[0] : undefined);
   return [from && first ? connect(added, from, { node: id, port: first.name }) : added, id];
 }
 
@@ -257,7 +262,7 @@ export function wireId(wire: Wire): string {
   return `${wire.from}->${wire.to.node}:${wire.to.port}`;
 }
 
-const KINDS = new Set<NodeKind>(["constant", "sine", "square", "sawtooth", "noise", "gain", "low_pass", "mix", "envelope", "output"]);
+const KINDS = new Set<NodeKind>(["constant", "sine", "square", "sawtooth", "noise", "gain", "low_pass", "mix", "envelope", "output", "melody"]);
 
 /**
  * Parse a saved project, checking the shape the editor relies on. The engine

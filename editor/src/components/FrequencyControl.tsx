@@ -24,7 +24,7 @@ function compactPitch({ midi, cents }: Pitch): string {
 }
 
 export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, role, override, onOverride,
-  onChange, onBeginContinuous }: {
+  onChange, onBeginContinuous, badge }: {
   id: string;
   descriptor: ParamDescriptor;
   value: number;
@@ -35,6 +35,8 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, r
   onOverride: (mode?: FrequencyMode) => void;
   onChange: (value: number, continuous: boolean) => void;
   onBeginContinuous: () => void;
+  /** PROTOTYPE oscillator pitch: names a port that sits on this row. */
+  badge?: React.ReactNode;
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -72,7 +74,7 @@ export function FrequencyControl({ id, descriptor, value, invalid, sampleRate, r
   return (
     <div className={`param frequency-row${invalid ? " invalid" : ""}`} title={invalid}>
       <div className="param-top">
-        <label htmlFor={id}>{label}</label>
+        <label htmlFor={id}>{label}{badge}</label>
         <span className="frequency-values">
           <button type="button" className="value nodrag" ref={anchor}
             aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id + "-editor" : undefined}

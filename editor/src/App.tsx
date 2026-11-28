@@ -11,6 +11,8 @@ import { Palette } from "./components/Palette";
 import { ProbePanel } from "./components/ProbePanel";
 import { StatusBar } from "./components/StatusBar";
 import { TopBar } from "./components/TopBar";
+import { OscSwitcher, oscillatorScenario, prototypeActive } from "./prototype/oscillator-pitch.prototype";
+import { DocNodesProvider } from "./prototype/doc-nodes.prototype";
 import {
   type Catalog,
   type EditorDocument,
@@ -94,7 +96,8 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
   // Sample rate and limits follow the output device each time playback starts.
   const [session, setSession] = useState(initialSession);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
-    doc: loadDocument() ?? studioDocument(studioPatch as GraphSpec),
+    // PROTOTYPE oscillator pitch
+    doc: prototypeActive() ? oscillatorScenario(studioDocument(studioPatch as GraphSpec)) : loadDocument() ?? studioDocument(studioPatch as GraphSpec),
     past: [],
     future: [],
   }));
@@ -209,9 +212,11 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
   };
 
   const selectedNode = selected.size === 1 ? doc.nodes.find((node) => selected.has(node.id)) ?? null : null;
+  const nodesById = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node])), [doc.nodes]);
   const playing = engine.playback.state === "playing";
 
   return (
+    <DocNodesProvider value={nodesById}>
     <div className="app">
       <TopBar
         name={doc.name}
@@ -309,7 +314,9 @@ function Editor({ client, catalog, session: initialSession }: { client: EngineCl
       {exportSource !== null && (
         <ExportDialog name={doc.name} source={exportSource} onClose={() => setExportSource(null)} />
       )}
+      <OscSwitcher />
     </div>
+    </DocNodesProvider>
   );
 }
 

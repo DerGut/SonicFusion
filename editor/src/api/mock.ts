@@ -53,7 +53,7 @@ export class MockEngine implements EngineClient {
   private revisionListeners = new Set<(event: RevisionEvent) => void>();
 
   async catalog() {
-    return catalogJson as NodeDescriptor[];
+    return CATALOG;
   }
 
   async sessionInfo() {
@@ -202,7 +202,7 @@ function issue(code: string, node: string | null, message: string, port: string 
 }
 
 function optionalInputs(node: NodeSpec) {
-  const descriptor = catalogJson.find(candidate => candidate.kind === node.kind);
+  const descriptor = CATALOG.find(candidate => candidate.kind === node.kind);
   return descriptor?.inputs.filter(port => !port.required) ?? [];
 }
 
@@ -215,6 +215,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in"];
     case "envelope":
       return ["in", "gate"];
+    case "melody":
+      return ["advance"];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -335,6 +337,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     };
     const frequencyControl = (node?.kind === "sawtooth" || node?.kind === "sine") && feeds.has(`${id}:frequency`) ? input("frequency") : null;
     const baseHz = Number(node?.params.frequency_hz ?? 0);
+    // PROTOTYPE: a connected Note input replaces the base frequency (v → MIDI 60 + 60·v); FM still scales it.
+    const noteControl = (node?.kind === "sawtooth" || node?.kind === "sine") && feeds.has(`${id}:note`) ? input("note") : null;
+    const melodyNotes = node?.kind === "melody" ? melodyPitch(input("advance"), node.params, frames) : null;
     let modulatedPhase = (start * baseHz / INFO.sample_rate_hz) % 1;
     const p = (name: string) => Number(node?.params[name] ?? 0);
     if (node?.kind === "envelope") {
@@ -354,17 +359,21 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           break;
         case "sine":
         case "sawtooth": {
-          const currentPhase = frequencyControl ? modulatedPhase : phase;
+          const currentPhase = frequencyControl || noteControl ? modulatedPhase : phase;
           out[n] = node.kind === "sine" ? Math.sin(2 * Math.PI * currentPhase) : 2 * currentPhase - 1;
-          if (frequencyControl) {
+          if (frequencyControl || noteControl) {
             const nyquist = INFO.sample_rate_hz / 2 * (1 - Number.EPSILON / 2);
-            const hz = Math.min(baseHz * 2 ** frequencyControl[n], nyquist);
+            const base = noteControl ? 440 * 2 ** ((60 + 60 * Math.max(-1, Math.min(1, noteControl[n])) - 69) / 12) : baseHz;
+            const hz = Math.min(base * 2 ** (frequencyControl?.[n] ?? 0), nyquist);
             modulatedPhase = (modulatedPhase + hz / INFO.sample_rate_hz) % 1;
           }
           break;
         }
         case "constant":
           out[n] = p("value");
+          break;
+        case "melody":
+          out[n] = melodyNotes![n];
           break;
         case "noise":
           out[n] = whiteNoise(start + n, noiseKey);
@@ -510,4 +519,38 @@ function mix32(value: number): number {
 
 function clamp(value: number) {
   return Math.max(-1, Math.min(1, value));
+}
+
+/** PROTOTYPE: the Note input and a minimal Melody source; neither exists in the engine. */
+const CATALOG: NodeDescriptor[] = prototypeCatalog(catalogJson as NodeDescriptor[]);
+
+function prototypeCatalog(catalog: NodeDescriptor[]): NodeDescriptor[] {
+  // After FM, so dropped control wires keep auto-connecting to FM.
+  const note = { name: "note", label: "Note", signal: "control" as const, required: false };
+  const withNote = catalog.map((node) => (node.kind === "sine" || node.kind === "sawtooth" ? { ...node, inputs: [...node.inputs, note] } : node));
+  const output = withNote.findIndex((node) => node.kind === "output");
+  return [...withNote.slice(0, output), {
+    kind: "melody",
+    label: "Melody",
+    category: "source",
+    signature: "melody(notes, advance)",
+    inputs: [{ name: "advance", label: "Advance", signal: "control", required: true }],
+    variadic_input: null,
+    has_output: true,
+    params: [],
+  } as NodeDescriptor, ...withNote.slice(output)];
+}
+
+/** Next note on each rising edge of `advance`; holds between edges and loops. */
+function melodyPitch(advance: Float32Array, params: Record<string, unknown>, frames: number): Float32Array {
+  const notes = (params.notes as number[] | undefined) ?? [60];
+  const out = new Float32Array(frames);
+  let index = -1, high = false;
+  for (let n = 0; n < frames; n++) {
+    const nowHigh = advance[n] > 0;
+    if (nowHigh && !high) index = (index + 1) % notes.length;
+    high = nowHigh;
+    out[n] = (notes[Math.max(0, index)] - 60) / 60;
+  }
+  return out;
 }

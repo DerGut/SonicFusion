@@ -359,3 +359,20 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .plot .scope-peak-band { fill: rgba(255, 180, 96, 0.14); stroke: var(--audio); stroke-width: 1.25; }
 .plot .scope-gate-mixed { fill: var(--control); opacity: 0.18; }
 .plot .scope-gate { fill: none; stroke: var(--control); stroke-width: 1.5; stroke-dasharray: 5 4; }
+
+/* PROTOTYPE oscillator pitch — throwaway */
+.proto-switcher { position: fixed; left: 50%; top: 84px; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; background: #f4f0e6; color: #111; box-shadow: 0 6px 24px #0009; font-size: 12px; white-space: nowrap; }
+.proto-switcher button { border: 0; background: #111; color: #fff; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; }
+.proto-io-label { color: var(--control-soft); }
+.proto-note-row { height: 52px; min-height: 0; padding-bottom: 0; }
+.proto-note-row .param-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proto-note-row.base-unused .param-top, .proto-note-row.base-unused .value { color: var(--muted); }
+.proto-inputs-row { gap: 4px; justify-content: center; padding-top: 4px; }
+.proto-input { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.proto-input-name { flex: none; width: 44px; color: var(--text-2); }
+.proto-input.on .proto-input-name, .proto-input.on .proto-input-state { color: var(--control-soft); }
+.proto-input-state { overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.proto-pitch-summary { margin: 0; padding: 0 12px 8px 14px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proto-pitch-summary strong { color: var(--control-soft); font-weight: 600; }
+.proto-port-badge { margin-left: 5px; padding: 0 3px; border: 1px solid var(--edge); border-radius: 3px; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+.proto-port-badge.on { border-color: var(--control); color: var(--control-soft); }
