@@ -376,3 +376,4 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .proto-pitch-summary strong { color: var(--control-soft); font-weight: 600; }
 .proto-port-badge { margin-left: 5px; padding: 0 3px; border: 1px solid var(--edge); border-radius: 3px; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
 .proto-port-badge.on { border-color: var(--control); color: var(--control-soft); }
+.proto-unit-swap { border: 0; padding: 0 2px; border-radius: 3px; background: transparent; font: inherit; color: inherit; cursor: pointer; text-decoration: underline dotted; } .proto-unit-swap:hover { background: var(--raised); }

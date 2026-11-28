@@ -16,7 +16,7 @@ import { useSyncExternalStore } from "react";
 
 import type { NodeSpec } from "../api/types";
 import type { DocNode, EditorDocument } from "../model/document";
-import { noteName } from "../model/pitch";
+import { defaultFrequencyMode, hzToBpm, noteName, type FrequencyMode, type FrequencyRole } from "../model/pitch";
 import { formatHz } from "../model/signal";
 import { HEADER_HEIGHT, IO_HEIGHT, IO_PORT_TOP, ROW_HEIGHT } from "../components/flow";
 
@@ -110,6 +110,52 @@ export function noteRange(source: DocNode | undefined): string {
 
 type Source = { id: string; label: string } | undefined;
 
+/**
+ * The Note input speaks the receiving oscillator's unit: it reads "Note" on a
+ * note-led oscillator, "Freq" on a Hz-led one and "Tempo" on a BPM-led one.
+ * Only the label and readout change; the port and its mapping don't.
+ */
+export interface NoteView {
+  unit: FrequencyMode;
+  name: string;
+  row: string;
+  readout: string;
+  /** The unit the readout swaps to: Note ⇄ Hz when audible, Hz ⇄ BPM below 20 Hz. */
+  next?: FrequencyMode;
+}
+
+const midiHz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
+const hzText = (hz: number) => (hz >= 1000 ? `${Number((hz / 1000).toPrecision(3))} kHz` : `${Number(hz.toPrecision(3))} Hz`);
+const span = <T,>(low: T, high: T, text: (value: T) => string) => (low === high ? text(low) : `${text(low)}–${text(high)}`);
+
+/** MIDI notes a source will send, when the editor can tell. */
+function incomingNotes(source: DocNode | undefined): number[] | null {
+  if (source?.kind === "melody" && Array.isArray(source.params.notes)) return source.params.notes as number[];
+  if (source?.kind === "constant" && typeof source.params.value === "number") {
+    return [60 + 60 * Math.max(-1, Math.min(1, source.params.value))];
+  }
+  return null;
+}
+
+export function noteView(source: DocNode | undefined, override: FrequencyMode | undefined, role: FrequencyRole, baseHz: number): NoteView {
+  // Unconnected, the label follows the oscillator's own Frequency and unit.
+  const notes = source ? incomingNotes(source) : baseHz > 0 ? [69 + 12 * Math.log2(baseHz / 440)] : null;
+  if (!notes) return { unit: "note", name: "♪ Note", row: "Pitch", readout: "follows input" };
+  const low = Math.min(...notes), high = Math.max(...notes);
+  const lowHz = midiHz(low), highHz = midiHz(high);
+  const audible = lowHz >= 20, rhythmic = highHz < 20;
+  const unit: FrequencyMode = override === "hz" || (override === "note" && audible) || (override === "bpm" && rhythmic)
+    ? override : defaultFrequencyMode(lowHz, role, true);
+  const next: FrequencyMode | undefined = audible ? (unit === "note" ? "hz" : "note") : rhythmic ? (unit === "bpm" ? "hz" : "bpm") : undefined;
+  if (unit === "note") return { unit, next, name: "♪ Note", row: "Pitch", readout: span(Math.round(low), Math.round(high), noteName) };
+  const bpm = (hz: number) => Number(hzToBpm(hz).toPrecision(4));
+  if (unit === "bpm") return { unit, next, name: "♩ Tempo", row: "Tempo", readout: lowHz === highHz ? `${bpm(lowHz)} BPM` : `${bpm(lowHz)}–${bpm(highHz)} BPM` };
+  const sameScale = (lowHz >= 1000) === (highHz >= 1000);
+  const readout = lowHz === highHz || !sameScale ? span(lowHz, highHz, hzText)
+    : `${hzText(lowHz).split(" ")[0]}–${hzText(highHz)}`;
+  return { unit, next, name: "Freq", row: "Frequency", readout };
+}
+
 /** Row heights are fixed, so ports can be placed inside a row. */
 export const rowTop = (index: number) => HEADER_HEIGHT + IO_HEIGHT + ROW_HEIGHT * index;
 
@@ -117,18 +163,19 @@ export const rowTop = (index: number) => HEADER_HEIGHT + IO_HEIGHT + ROW_HEIGHT 
  * The Frequency row while Note is connected: the row keeps its "Pitch" label and
  * shows where the pitch comes from; the stored Frequency is kept but unused.
  */
-export function NoteDrivenRow({ note, fm, notes, base, variant }: {
+export function NoteDrivenRow({ note, fm, view, base, variant, onUnit }: {
   note: NonNullable<Source>;
   fm: Source;
-  notes: string;
+  view: NoteView;
   base: number;
   variant: OscVariant;
+  onUnit: (unit: FrequencyMode) => void;
 }) {
   return (
     <div className={`param modulated proto-note-row${variant === "C" ? " base-unused" : ""}`}>
       <div className="param-top">
-        <span>{variant === "C" ? "Base" : "Pitch"}<PortBadge variant={variant} on={variant === "A" ? Boolean(fm) : true} /></span>
-        <span className="value">{variant === "C" ? formatHz(base) : notes}</span>
+        <span>{variant === "C" ? "Base" : view.row}<PortBadge variant={variant} on={variant === "A" ? Boolean(fm) : true} label={view.name} /></span>
+        {variant === "C" ? <span className="value">{formatHz(base)}</span> : <UnitSwap view={view} onUnit={onUnit} />}
       </div>
       <p className="param-note" title={`Frequency (${formatHz(base)}) is kept but unused while Note is connected`}>
         {variant === "C" ? "unused while Note is connected" : <>♪ {note.label} · replaces Frequency</>}
@@ -138,31 +185,44 @@ export function NoteDrivenRow({ note, fm, notes, base, variant }: {
 }
 
 /** Names the port that sits on the Frequency row: FM in A, Note in B. */
-export function PortBadge({ variant, on }: { variant: OscVariant; on: boolean }) {
+export function PortBadge({ variant, on, label = "♪ Note" }: { variant: OscVariant; on: boolean; label?: string }) {
   if (variant === "C") return null;
-  return <span className={`proto-port-badge${on ? " on" : ""}`}>{variant === "A" ? "∿FM" : "♪note"}</span>;
+  return <span className={`proto-port-badge${on ? " on" : ""}`}>{variant === "A" ? "∿FM" : label.replace(" ", "")}</span>;
+}
+
+/** The incoming value in the oscillator's unit; clicking swaps the unit, as on the Frequency row. */
+export function UnitSwap({ view, onUnit }: { view: NoteView; onUnit: (unit: FrequencyMode) => void }) {
+  if (!view.next) return <span className="value">{view.readout}</span>;
+  const nextName = view.next === "note" ? "notes" : view.next === "bpm" ? "BPM" : "Hz";
+  return (
+    <button type="button" className="value nodrag proto-unit-swap" title={`Show in ${nextName}`} onClick={() => onUnit(view.next!)}>
+      {view.readout}
+    </button>
+  );
 }
 
 /** C: one row naming both inputs, so each port has a label right next to it. */
-export function InputsRow({ note, fm, notes }: { note: Source; fm: Source; notes: string }) {
+export function InputsRow({ note, fm, view, onUnit }: { note: Source; fm: Source; view: NoteView; onUnit: (unit: FrequencyMode) => void }) {
   return (
     <div className="param proto-inputs-row">
       <div className={`proto-input${note ? " on" : ""}`}>
-        <span className="proto-input-name">♪ Note</span>
-        <span className="proto-input-state">{note ? `${note.label} · ${notes}` : "sets the note · uses Frequency"}</span>
+        <span className="proto-input-name">{view.name}</span>
+        {note ? (
+          <span className="proto-input-state" title={`from ${note.label}`}><UnitSwap view={view} onUnit={onUnit} /> · {note.label}</span>
+        ) : <span className="proto-input-state">sets the {view.unit === "note" ? "note" : view.unit === "bpm" ? "tempo" : "frequency"} · uses Base</span>}
       </div>
       <div className={`proto-input${fm ? " on" : ""}`}>
         <span className="proto-input-name">∿ FM</span>
-        <span className="proto-input-state">{fm ? `${fm.label} · ±1 oct` : "bends ±1 octave"}</span>
+        <span className="proto-input-state" title={fm ? `from ${fm.label}` : undefined}>{fm ? `±1 oct · ${fm.label}` : "bends ±1 octave"}</span>
       </div>
     </div>
   );
 }
 
 /** The result, once any pitch input is connected: what the oscillator plays. */
-export function PitchSummary({ note, fm, notes, base }: { note: Source; fm: Source; notes: string; base: number }) {
+export function PitchSummary({ note, fm, view, base }: { note: Source; fm: Source; view: NoteView; base: number }) {
   if (!note && !fm) return null;
-  const root = note ? notes : formatHz(base);
+  const root = note ? view.readout : formatHz(base);
   return (
     <p className="proto-pitch-summary" title={`Note sets the base; FM scales it by 2^control, up to one octave each way${fm ? ` (FM from ${fm.label})` : ""}`}>
       Plays <strong>{root}</strong>{fm ? <> ±1 oct (FM)</> : null}

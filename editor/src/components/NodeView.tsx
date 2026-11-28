@@ -12,7 +12,7 @@ import { ParamControl } from "./ParamControl";
 import { FrequencyControl } from "./FrequencyControl";
 import { ConstantReadout } from "./ConstantReadout";
 // PROTOTYPE oscillator pitch
-import { InputsRow, NoteDrivenRow, PortBadge, PitchSummary, ioLabel, melodySummary, noteRange, portTops, prototypeActive, useOscVariant } from "../prototype/oscillator-pitch.prototype";
+import { InputsRow, NoteDrivenRow, PortBadge, PitchSummary, ioLabel, melodySummary, noteView, portTops, prototypeActive, useOscVariant } from "../prototype/oscillator-pitch.prototype";
 import { useDocNodes } from "../prototype/doc-nodes.prototype";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
@@ -29,7 +29,8 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const pitchDesign = Boolean(noteIn && prototypeActive());
   const noteSource = noteIn ? sources[noteIn.name] : undefined;
   const fmSource = frequencyIn ? sources[frequencyIn.name] : undefined;
-  const notes = noteRange(noteSource ? docNodes.get(noteSource.id) : undefined);
+  const view = noteView(noteSource ? docNodes.get(noteSource.id) : undefined, node.frequencyMode, data.frequencyRole, Number(node.params.frequency_hz));
+  const setUnit = (unit: Parameters<typeof actions.setFrequencyMode>[1]) => actions.setFrequencyMode(node.id, unit);
   const className = [
     "sf-node",
     selected && "selected",
@@ -106,7 +107,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     );
   }
 
-  if (pitchDesign && oscVariant === "C") rows.push(<InputsRow key="inputs" note={noteSource} fm={fmSource} notes={notes} />);
+  if (pitchDesign && oscVariant === "C") rows.push(<InputsRow key="inputs" note={noteSource} fm={fmSource} view={view} onUnit={setUnit} />);
   const advance = ports.find((port) => port.name === "advance");
   if (advance) {
     handles.push(inputHandle(advance, rowPortTop(0)));
@@ -157,11 +158,11 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
         if (frequencyIn) handles.push(inputHandle(frequencyIn, tops.fm));
       }
       rows.push(pitchDesign && param.frequency === "pitch" && noteSource ? (
-        <NoteDrivenRow key={param.name} note={noteSource} fm={fmSource} notes={notes} base={frequencyBase} variant={oscVariant} />
+        <NoteDrivenRow key={param.name} note={noteSource} fm={fmSource} view={view} base={frequencyBase} variant={oscVariant} onUnit={setUnit} />
       ) : param.frequency ? (
         <FrequencyControl key={param.name} {...props} sampleRate={session.sample_rate_hz}
           role={data.frequencyRole} override={node.frequencyMode}
-          badge={pitchDesign && param.frequency === "pitch" ? <PortBadge variant={oscVariant} on={oscVariant === "A" ? Boolean(fmSource) : Boolean(noteSource)} /> : undefined}
+          badge={pitchDesign && param.frequency === "pitch" ? <PortBadge variant={oscVariant} on={oscVariant === "A" ? Boolean(fmSource) : Boolean(noteSource)} label={view.name} /> : undefined}
           onOverride={(mode) => actions.setFrequencyMode(node.id, mode)} />
       ) : <ParamControl key={param.name} {...props} />);
     }
@@ -185,7 +186,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       </div>
       {rows}
       {pitchDesign && oscVariant !== "C" && (
-        <PitchSummary note={noteSource} fm={fmSource} notes={notes} base={Number(node.params.frequency_hz)} />
+        <PitchSummary note={noteSource} fm={fmSource} view={view} base={Number(node.params.frequency_hz)} />
       )}
       {node.kind === "constant" && <ConstantReadout destinations={data.constantDestinations} />}
       {descriptor.variadic_input && (
