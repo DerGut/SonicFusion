@@ -186,6 +186,11 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
 .param.modulated .param-top, .param.modulated .value { color: var(--control-soft); }
 .param-note { margin: 0; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.constant-readout { padding: 0 12px 10px; }
+.constant-destination + .constant-destination { margin-top: 8px; }
+.constant-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin: 0; font-size: 11px; }
+.constant-heading .param-note { min-width: 0; }
+.constant-heading strong { flex-shrink: 0; font-weight: 500; }
 .range { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 4px; margin: 0; border-radius: 2px; background: var(--track); cursor: ew-resize; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); box-shadow: 0 0 0 1px #4a5361; }
 .range::-moz-range-thumb { width: 8px; height: 8px; border-radius: 50%; background: var(--text); border: 2px solid var(--node); }

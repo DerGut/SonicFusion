@@ -307,6 +307,12 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
       }
     }
     const severity: GraphIssue["severity"] = reachable.has(node.id) ? "error" : "warning";
+    if (node.kind === "constant") {
+      const value = node.params.value;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < -1 || value > 1) {
+        issues.push({ ...issue("invalid_parameter", node.id, "constant value must be finite and between -1 and 1"), param: "value", severity });
+      }
+    }
     issues.push(...envelopeParamIssues(node).map((problem) => ({ ...problem, severity })));
   }
   return issues;
@@ -357,6 +363,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           }
           break;
         }
+        case "constant":
+          out[n] = p("value");
+          break;
         case "noise":
           out[n] = whiteNoise(start + n, noiseKey);
           break;

@@ -10,9 +10,10 @@ use datafusion::{
 use crate::{
     ExecutionConfig,
     physical::frame::{
-        Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
-        FrameSquareOscExec, FrameWhiteNoiseExec, low_pass_with_mix, validate_constant_cutoff,
-        validate_frequency, validate_low_pass_mix, validate_pulse_width,
+        Cutoff, FrameConstantExec, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec,
+        FrameSineOscExec, FrameSquareOscExec, FrameWhiteNoiseExec, low_pass_with_mix,
+        validate_constant, validate_constant_cutoff, validate_frequency, validate_low_pass_mix,
+        validate_pulse_width,
     },
 };
 
@@ -31,6 +32,7 @@ pub(crate) enum PreparedCutoff {
 
 #[derive(Debug)]
 pub(crate) enum Node {
+    Constant(f64),
     Sine(f64, Option<NodeId>),
     Square(f64, f64),
     Sawtooth(f64, Option<NodeId>),
@@ -61,6 +63,7 @@ impl GraphBuilder {
     /// Inputs must be IDs returned by previous calls on this builder.
     pub(crate) fn add(&mut self, node: Node) -> Result<NodeId> {
         match &node {
+            Node::Constant(value) => validate_constant(*value)?,
             Node::Sine(hz, _) | Node::Sawtooth(hz, _) => {
                 validate_frequency(*hz, self.sample_rate_hz, "frequency_hz")?;
             }
@@ -117,6 +120,7 @@ impl PreparedGraph {
         for (index, node) in self.nodes.into_iter().enumerate() {
             let input = |id: NodeId| plans[id.0].clone();
             let plan: Plan = match node {
+                Node::Constant(value) => Arc::new(FrameConstantExec::try_new(config, value)?),
                 Node::Sine(hz, modulation) => Arc::new(match modulation {
                     None => FrameSineOscExec::try_new(config, hz)?,
                     Some(id) => FrameSineOscExec::try_new_modulated(

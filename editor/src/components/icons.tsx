@@ -1,6 +1,7 @@
 import type { NodeKind } from "../api/types";
 
 const strokes: Record<NodeKind, string[]> = {
+  constant: ["M1 8H15"],
   sine: ["M1 8C3.5 2 5.5 2 8 8S12.5 14 15 8"],
   square: ["M1 11H3V5H8V11H13V5H15"],
   sawtooth: ["M1 12L7 4V12L13 4V12"],

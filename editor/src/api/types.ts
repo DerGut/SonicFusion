@@ -2,6 +2,7 @@
 // itself is not duplicated here: it comes from the engine's catalog.
 
 export type NodeKind =
+  | "constant"
   | "sine"
   | "square"
   | "sawtooth"

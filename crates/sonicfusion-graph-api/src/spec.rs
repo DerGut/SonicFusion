@@ -49,6 +49,9 @@ pub struct NodeSpec {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "params", rename_all = "snake_case")]
 pub enum NodeKind {
+    Constant {
+        value: f64,
+    },
     Sine {
         frequency_hz: f64,
     },
@@ -100,6 +103,7 @@ impl NodeKind {
     /// The serialized `kind` tag.
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Constant { .. } => "constant",
             Self::Sine { .. } => "sine",
             Self::Square { .. } => "square",
             Self::Sawtooth { .. } => "sawtooth",
@@ -124,7 +128,7 @@ impl NodeKind {
             required: true,
         };
         match self {
-            Self::Square { .. } | Self::Noise {} => Vec::new(),
+            Self::Constant { .. } | Self::Square { .. } | Self::Noise {} => Vec::new(),
             Self::Sine { .. } | Self::Sawtooth { .. } => vec![InputPort {
                 name: "frequency".into(),
                 signal: Signal::Control,

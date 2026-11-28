@@ -496,6 +496,48 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn saved_constant_can_be_edited_in_a_running_patch() {
+        let mut graph = GraphSpec {
+            version: 1,
+            nodes: vec![
+                node("dc", NodeKind::Constant { value: 0.25 }),
+                node("out", NodeKind::Output {}),
+            ],
+            wires: vec![wire("dc", "out", "in")],
+        };
+        let graph_json = serde_json::to_string(&graph).unwrap();
+        graph = serde_json::from_str(&graph_json).unwrap();
+        let engine = Engine::with_settings(48000, 64).unwrap();
+        let (sender, mut chunks) = mpsc::unbounded_channel();
+        let session = Session::start_with_output(
+            &engine,
+            &graph,
+            ChannelOutput {
+                chunks: sender,
+                batch: NonZeroUsize::new(64).unwrap(),
+            },
+        )
+        .unwrap();
+        wait_for_sample(&mut chunks, 0.25).await;
+        graph.nodes[0].kind = NodeKind::Constant { value: -0.5 };
+        let (tx, mut updates) = mpsc::unbounded_channel();
+        session
+            .apply(&graph, move |update| {
+                let _ = tx.send(update);
+            })
+            .unwrap();
+        assert!(
+            final_status(&mut updates)
+                .await
+                .iter()
+                .any(|status| matches!(status, RevisionStatus::Applied { .. }))
+        );
+        wait_for_sample(&mut chunks, -0.5).await;
+        assert_eq!(session.active_graph(), graph);
+        assert_eq!(session.stop().await, SessionExit::Stopped);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn edit_insert_and_reject_without_restarting() {
         let engine = Engine::with_settings(48_000, 64).unwrap();
         let (sender, mut chunks) = mpsc::unbounded_channel();

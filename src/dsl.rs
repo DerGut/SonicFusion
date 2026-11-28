@@ -194,6 +194,13 @@ fn prepare_node(
                 Ok(Node::Square(hz, numbers[1]))
             }
         }
+        "constant" => {
+            if incoming.is_some() {
+                return Err(bad("constant is a source and takes no input".into()));
+            }
+            let values = numeric_args(source, at, name, args, 1)?;
+            Ok(Node::Constant(values[0]))
+        }
         "noise" => {
             if incoming.is_some() {
                 return Err(bad("noise is a source and takes no input".to_string()));
@@ -802,6 +809,15 @@ mod tests {
             (
                 "noise(4294967296) -> out",
                 "noise expects no arguments or a UInt32 seed",
+            ),
+            ("constant() -> out", "constant expects 1 numeric argument"),
+            (
+                "constant(1.000000001) -> out",
+                "constant value must be finite and between -1 and 1",
+            ),
+            (
+                "sine(440) -> constant(0) -> out",
+                "constant is a source and takes no input",
             ),
             ("sawtooth() -> out", "sawtooth expects 1 numeric argument"),
             (

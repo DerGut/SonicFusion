@@ -531,6 +531,14 @@ fn param_problems(
 ) -> Vec<(&'static str, String)> {
     let mut problems = Vec::new();
     match kind {
+        NodeKind::Constant { value } => {
+            if !value.is_finite() || !(-1.0..=1.0).contains(value) {
+                problems.push((
+                    "value",
+                    "constant value must be finite and between -1 and 1".into(),
+                ));
+            }
+        }
         NodeKind::Sine { frequency_hz } | NodeKind::Sawtooth { frequency_hz } => {
             problems.extend(frequency_problem(
                 "frequency_hz",
