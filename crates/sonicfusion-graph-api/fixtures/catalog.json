@@ -152,7 +152,7 @@
         "label": "Factor",
         "unit": null,
         "min": 0.0,
-        "max": 1.0,
+        "max": 4.0,
         "default": 0.1,
         "scale": "linear"
       }
