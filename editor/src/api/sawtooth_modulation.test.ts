@@ -45,13 +45,13 @@ it("ignores an invalid saved frequency wire to a node without that port", async 
   const doc = fromGraph({
     version: 1,
     nodes: [
-      { id: "sine", kind: "sine", params: { frequency_hz: 220 } },
+      { id: "square", kind: "square", params: { frequency_hz: 220, pulse_width: 0.5 } },
       { id: "gain", kind: "gain", params: { factor: 0.5 } },
       { id: "out", kind: "output", params: {} },
     ],
     wires: [
-      { from: "sine", to: { node: "out", port: "in" } },
-      { from: "gain", to: { node: "sine", port: "frequency" } },
+      { from: "square", to: { node: "out", port: "in" } },
+      { from: "gain", to: { node: "square", port: "frequency" } },
     ],
   }, "Unused input", {});
   const saved = toGraph(parseDocument(JSON.stringify(doc)));

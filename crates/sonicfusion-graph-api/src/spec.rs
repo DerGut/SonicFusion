@@ -124,8 +124,8 @@ impl NodeKind {
             required: true,
         };
         match self {
-            Self::Sine { .. } | Self::Square { .. } | Self::Noise {} => Vec::new(),
-            Self::Sawtooth { .. } => vec![InputPort {
+            Self::Square { .. } | Self::Noise {} => Vec::new(),
+            Self::Sine { .. } | Self::Sawtooth { .. } => vec![InputPort {
                 name: "frequency".into(),
                 signal: Signal::Control,
                 required: false,

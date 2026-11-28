@@ -44,11 +44,13 @@ Nyquist, and zero holds -1. The Rust API is
 `FrameSawToothOscExec::try_new(&config, frequency_hz)` in `physical::frame`.
 Like the square oscillator, the sawtooth is not band-limited.
 
-The Sawtooth editor node's optional FM port maps a normalized control sample
+The Sine and Sawtooth editor nodes' optional FM ports map a normalized control sample
 `m` to `base_frequency * 2^m`, capped just below Nyquist. The base-frequency
 control stays editable. A control of -1 moves down one octave, 0 leaves the
 frequency at its base, and +1 moves up one octave. Zero base frequency stays
-at zero. For example:
+at zero. Control samples must be finite and in [-1, 1]; invalid streams are rejected.
+The same mapping applies to `sine(frequency, $control)` and `sawtooth(frequency, $control)`.
+For example:
 
 ```text
 sine(3) -> $lfo;

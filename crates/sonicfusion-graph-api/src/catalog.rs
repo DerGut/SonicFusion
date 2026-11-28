@@ -48,8 +48,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             kind: "sine".into(),
             label: "Sine".into(),
             category: Category::Source,
-            signature: "sine(freq)".into(),
-            inputs: Vec::new(),
+            signature: "sine(freq, [fm])".into(),
+            inputs: vec![PortDescriptor {
+                name: "frequency".into(),
+                label: "Frequency modulation".into(),
+                signal: Signal::Control,
+                required: false,
+            }],
             variadic_input: None,
             has_output: true,
             params: vec![hz(
