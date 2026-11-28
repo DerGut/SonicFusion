@@ -217,6 +217,12 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
     if (!reachable.has(node.id)) {
       issues.push({ ...issue("unreachable", node.id, "not connected to the output; it won't be played"), severity: "warning" });
     }
+    for (const name of ["frequency_hz", "cutoff_hz"]) {
+      const value = node.params[name];
+      if (typeof value === "number" && value >= INFO.sample_rate_hz / 2) {
+        issues.push({ ...issue("invalid_parameter", node.id, `${name === "cutoff_hz" ? "cutoff" : "frequency"} must be below Nyquist (24000 Hz at 48000 Hz)`), param: name });
+      }
+    }
     if (node.kind === "envelope" && reachable.has(node.id)) {
       for (const name of ["attack_seconds", "decay_seconds", "sustain_level", "release_seconds"]) {
         const value = node.params[name];
@@ -225,12 +231,6 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
           const message = sustain ? "sustain must be between 0 and 1" : `${name.split("_")[0]} must be a finite nonnegative time`;
           issues.push({ ...issue("invalid_parameter", node.id, message), param: name });
         }
-      }
-    }
-    for (const name of ["frequency_hz", "cutoff_hz"]) {
-      const value = node.params[name];
-      if (typeof value === "number" && value >= INFO.sample_rate_hz / 2) {
-        issues.push({ ...issue("invalid_parameter", node.id, `${name === "cutoff_hz" ? "cutoff" : "frequency"} must be below Nyquist (24000 Hz at 48000 Hz)`), param: name });
       }
     }
   }
