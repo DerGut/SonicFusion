@@ -17,7 +17,8 @@ describe("frequency and pitch", () => {
     expect(snapTempoHz(2.008, 0.01, 20_000)).toBe(2);
     expect(snapTempoHz(0.01, 0.01, 20_000)).toBe(bpmToHz(1));
     expect(snapTempoHz(19.999, 0.01, 20_000)).toBe(bpmToHz(1199));
-    expect(snapTempoHz(19.999, 0.01, 20_000, 1)).toBe(19.999);
+    expect(snapTempoHz(19.999, 0.01, 20_000, 1)).toBe(20);
+    expect(snapTempoHz(19.999, 0.01, 19.999, 1)).toBe(19.999);
     expect(snapTempoHz(bpmToHz(121), 0.01, 20_000, 1)).toBe(bpmToHz(122));
     expect(snapTempoHz(bpmToHz(125), 0.01, 2)).toBe(2);
   });
@@ -52,6 +53,9 @@ describe("frequency and pitch", () => {
     expect(parseFrequency("BPM", "bpm")).toBeNaN();
     expect(parseFrequency("120 BPM")).toBeNaN();
     expect(parseFrequency("120 bpm", "note", true)).toBe(2);
+    expect(parseFrequency("1199.5 bpm", "note", true)).toBe(bpmToHz(1199.5));
+    expect(parseFrequency("1200 bpm", "note", true)).toBeNaN();
+    expect(parseFrequency("-1 bpm", "hz", true)).toBeNaN();
     expect(parseFrequency("2 Hz", "bpm")).toBe(2);
     expect(parseFrequency("C#4", "bpm")).toBe(parseFrequency("C#4"));
     expect(parseFrequency("Hz")).toBeNaN();

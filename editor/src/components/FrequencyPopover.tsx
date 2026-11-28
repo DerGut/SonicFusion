@@ -7,7 +7,7 @@ import { ParameterRange } from "./ParameterRange";
 const WHITE_KEYS_PER_OCTAVE = 7;
 const BLACK_KEY_BOUNDARY: Record<number, number> = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 };
 const TEMPO_PRESETS = [60, 90, 100, 120, 128, 140, 174];
-const TAP_TIMEOUT_MS = 2500;
+const TAP_TIMEOUT_MS = 10_000;
 const MODE_OPTIONS = [[undefined, "Auto"], ...FREQUENCY_MODES] as const;
 const octaveOf = (midi: number) => Math.floor(midi / 12) - 1;
 
@@ -58,9 +58,9 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
     const hz = draft === exactValue ? value : draft.trim() ? parseFrequency(draft, mode, allowBpm) : NaN;
     const valid = Number.isFinite(hz) && (!bpm || validTempo(hz));
     if (!valid && report) {
-      const message = Number.isFinite(hz)
+      const message = bpm
         ? "Enter a nonnegative tempo below " + TEMPO_CEILING_BPM + " BPM and within the device's frequency range."
-        : allowBpm ? "Enter a frequency in Hz, as a note such as C#4, or in BPM."
+        : allowBpm ? "Enter Hz, a note such as C#4, or a tempo below " + TEMPO_CEILING_BPM + " BPM."
         : "Enter a frequency in Hz or a note such as C#4.";
       exact.current?.setCustomValidity(message);
       exact.current?.reportValidity();
@@ -221,7 +221,8 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
             <span aria-hidden="true">Frequency unit</span>
             {unitOptions.map(([unit, name]) => (
               <label key={name}>
-                <input type="radio" name={id + "-unit"} checked={preferredMode === unit} onChange={() => onModeChange(unit)} />
+                <input type="radio" name={id + "-unit"} checked={(dormantMode ? undefined : preferredMode) === unit}
+                  onChange={() => onModeChange(unit)} />
                 {name}
               </label>
             ))}
@@ -236,7 +237,9 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
         event.preventDefault();
         commit(true);
       }}>
-        <label htmlFor={id + "-exact"}>{bpm ? "BPM" : "Hz or note"}</label>
+        <label htmlFor={id + "-exact"}>
+          {bpm ? "BPM (<" + TEMPO_CEILING_BPM + ")" : allowBpm ? "Hz, note, or BPM" : "Hz or note"}
+        </label>
         <input id={id + "-exact"} ref={exact} className="value-input nodrag" value={text ?? exactValue}
           onFocus={(event) => event.currentTarget.select()} onBlur={() => commit(false)} onChange={(event) => {
             event.currentTarget.setCustomValidity("");

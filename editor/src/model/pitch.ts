@@ -97,7 +97,8 @@ export function snapTempoHz(hz: number, min: number, max: number, direction = 0)
   const nearest = Math.round(bpm);
   const basis = bpmToHz(nearest) === hz ? nearest : bpm;
   const next = direction > 0 ? Math.floor(basis) + 1 : direction < 0 ? Math.ceil(basis) - 1 : nearest;
-  if ((direction > 0 && next > last) || (direction < 0 && next < first)) return hz;
+  if (direction > 0 && next > last) return max >= PITCH_FLOOR_HZ ? PITCH_FLOOR_HZ : hz;
+  if (direction < 0 && next < first) return hz;
   return bpmToHz(Math.min(last, Math.max(first, next)));
 }
 
@@ -109,7 +110,8 @@ export function parseFrequency(text: string, mode: FrequencyMode = "hz", allowBp
     const number = value.slice(0, suffix.index).trim();
     const bpm = suffix[0].toLowerCase() === "bpm";
     if (!number || (bpm && !allowBpm)) return NaN;
-    return bpm ? bpmToHz(Number(number)) : Number(number);
+    const hz = bpm ? bpmToHz(Number(number)) : Number(number);
+    return bpm && !isTempoFrequency(hz) ? NaN : hz;
   }
   const match = /^([A-G])([#b♯♭]?)(-?\d+)(?:\s*([+-]\d+(?:\.\d+)?)\s*[c¢])?$/i.exec(value);
   if (!match) return mode === "bpm" ? bpmToHz(Number(value)) : Number(value);
