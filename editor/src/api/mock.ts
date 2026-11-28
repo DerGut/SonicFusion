@@ -337,7 +337,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     };
     const frequencyControl = (node?.kind === "sawtooth" || node?.kind === "sine") && feeds.has(`${id}:frequency`) ? input("frequency") : null;
     const baseHz = Number(node?.params.frequency_hz ?? 0);
-    // PROTOTYPE: a connected Note input replaces the base frequency (v → MIDI 60 + 60·v); FM still scales it.
+    // PROTOTYPE: a connected Note input replaces the base frequency (v → MIDI 60 + 120·v); FM still scales it.
     const noteControl = (node?.kind === "sawtooth" || node?.kind === "sine") && feeds.has(`${id}:note`) ? input("note") : null;
     const melodyNotes = node?.kind === "melody" ? melodyPitch(input("advance"), node.params, frames) : null;
     let modulatedPhase = (start * baseHz / INFO.sample_rate_hz) % 1;
@@ -363,7 +363,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           out[n] = node.kind === "sine" ? Math.sin(2 * Math.PI * currentPhase) : 2 * currentPhase - 1;
           if (frequencyControl || noteControl) {
             const nyquist = INFO.sample_rate_hz / 2 * (1 - Number.EPSILON / 2);
-            const base = noteControl ? 440 * 2 ** ((60 + 60 * Math.max(-1, Math.min(1, noteControl[n])) - 69) / 12) : baseHz;
+            const base = noteControl ? 440 * 2 ** ((60 + 120 * Math.max(-1, Math.min(1, noteControl[n])) - 69) / 12) : baseHz;
             const hz = Math.min(base * 2 ** (frequencyControl?.[n] ?? 0), nyquist);
             modulatedPhase = (modulatedPhase + hz / INFO.sample_rate_hz) % 1;
           }
@@ -550,7 +550,7 @@ function melodyPitch(advance: Float32Array, params: Record<string, unknown>, fra
     const nowHigh = advance[n] > 0;
     if (nowHigh && !high) index = (index + 1) % notes.length;
     high = nowHigh;
-    out[n] = (notes[Math.max(0, index)] - 60) / 60;
+    out[n] = (notes[Math.max(0, index)] - 60) / 120;
   }
   return out;
 }

@@ -6,7 +6,7 @@
  *
  * Rule (all variants): base = Note connected ? note(v) : Frequency;
  *                      frequency = base × 2^FM, capped below Nyquist.
- * Note maps v → MIDI 60 + 60·v. FM keeps the shipped ±1 octave mapping.
+ * Note maps v → MIDI 60 + 120·v (±10 octaves, so tempos fit too). FM keeps the shipped ±1 octave mapping.
  *
  * A · "Note leads": Note takes the in/out row; FM moves to the Frequency row it scales.
  * B · "FM stays": FM keeps the in/out row; Note sits on the Frequency row it replaces.
@@ -103,7 +103,7 @@ export function noteRange(source: DocNode | undefined): string {
     return low === high ? noteName(low) : `${noteName(low)}–${noteName(high)}`;
   }
   if (source.kind === "constant" && typeof source.params.value === "number") {
-    return noteName(Math.round(60 + 60 * Math.max(-1, Math.min(1, source.params.value))));
+    return noteName(Math.round(60 + 120 * Math.max(-1, Math.min(1, source.params.value))));
   }
   return "follows input";
 }
@@ -132,7 +132,7 @@ const span = <T,>(low: T, high: T, text: (value: T) => string) => (low === high 
 function incomingNotes(source: DocNode | undefined): number[] | null {
   if (source?.kind === "melody" && Array.isArray(source.params.notes)) return source.params.notes as number[];
   if (source?.kind === "constant" && typeof source.params.value === "number") {
-    return [60 + 60 * Math.max(-1, Math.min(1, source.params.value))];
+    return [60 + 120 * Math.max(-1, Math.min(1, source.params.value))];
   }
   return null;
 }
