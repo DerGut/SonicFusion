@@ -41,4 +41,14 @@ it("persists envelope settings and wires, and shapes a square-gated audio signal
   expect(samples).toEqual([0.25, 0.25, 0, 0, 0.25, 0.25, 0, 0]);
   const invalid = await engine.validate(toGraph(setParam(reopened, envelope, "sustain_level", 1.1)));
   expect(invalid).toContainEqual(expect.objectContaining({ code: "invalid_parameter", node: envelope, param: "sustain_level" }));
+
+  // Saved documents can be incomplete. A powered gate must not start rendering
+  // with a missing duration, even when only probing a branch of the draft.
+  const saved = structuredClone(configured);
+  delete saved.nodes.find((node) => node.id === envelope)!.params.attack_seconds;
+  const malformed = toGraph(parseDocument(JSON.stringify(saved)));
+  await expect(engine.probe(malformed, "out", 8)).rejects.toMatchObject({
+    kind: "invalid",
+    issues: [expect.objectContaining({ code: "invalid_parameter", node: envelope, param: "attack_seconds" })],
+  });
 });

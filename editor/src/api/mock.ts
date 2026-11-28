@@ -96,8 +96,8 @@ export class MockEngine implements EngineClient {
   }
 
   async probe(graph: GraphSpec, node: string, frames: number): Promise<ProbeWindow> {
-    const missing = missingUpstream(graph, node);
-    if (missing.length > 0) throw error("invalid", `the graph has ${missing.length} error(s)`, missing);
+    const issues = upstreamIssues(graph, node);
+    if (issues.length > 0) throw error("invalid", `the graph has ${issues.length} error(s)`, issues);
     const start = this.playing ? this.frame() : 0;
     return {
       node,
@@ -166,8 +166,22 @@ function inputNames(node: NodeSpec): string[] {
   }
 }
 
-/** Required inputs left open in `node` or anything feeding it, as the host reports them. */
-function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
+function envelopeParamIssues(node: NodeSpec): GraphIssue[] {
+  if (node.kind !== "envelope") return [];
+  const issues: GraphIssue[] = [];
+  for (const name of ["attack_seconds", "decay_seconds", "sustain_level", "release_seconds"]) {
+    const value = node.params[name];
+    const sustain = name === "sustain_level";
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || (sustain && value > 1)) {
+      const message = sustain ? "sustain must be between 0 and 1" : `${name.split("_")[0]} must be a finite nonnegative time`;
+      issues.push({ ...issue("invalid_parameter", node.id, message), param: name });
+    }
+  }
+  return issues;
+}
+
+/** Unwired inputs and invalid envelope settings in the selected branch. */
+function upstreamIssues(graph: GraphSpec, node: string): GraphIssue[] {
   const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
   const issues: GraphIssue[] = [];
   const seen = new Set<string>();
@@ -178,6 +192,7 @@ function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
     seen.add(id);
     const spec = graph.nodes.find((candidate) => candidate.id === id);
     if (!spec) continue;
+    issues.push(...envelopeParamIssues(spec));
     for (const port of inputNames(spec)) {
       const from = feeds.get(`${id}:${port}`);
       if (from) pending.push(from);
@@ -223,16 +238,8 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
         issues.push({ ...issue("invalid_parameter", node.id, `${name === "cutoff_hz" ? "cutoff" : "frequency"} must be below Nyquist (24000 Hz at 48000 Hz)`), param: name });
       }
     }
-    if (node.kind === "envelope" && reachable.has(node.id)) {
-      for (const name of ["attack_seconds", "decay_seconds", "sustain_level", "release_seconds"]) {
-        const value = node.params[name];
-        const sustain = name === "sustain_level";
-        if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || (sustain && value > 1)) {
-          const message = sustain ? "sustain must be between 0 and 1" : `${name.split("_")[0]} must be a finite nonnegative time`;
-          issues.push({ ...issue("invalid_parameter", node.id, message), param: name });
-        }
-      }
-    }
+    const severity: GraphIssue["severity"] = reachable.has(node.id) ? "error" : "warning";
+    issues.push(...envelopeParamIssues(node).map((problem) => ({ ...problem, severity })));
   }
   return issues;
 }
@@ -329,6 +336,11 @@ function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSp
       const duration = stage === "attack" ? attack : stage === "decay" ? decay : release;
       const target = stage === "attack" ? 1 : stage === "decay" ? sustain : 0;
       const next = stage === "attack" ? "decay" : stage === "decay" ? "sustain" : "idle";
+      if (duration === 0) {
+        level = target;
+        enter(next);
+        continue;
+      }
       elapsed += 1;
       if (elapsed >= duration) {
         level = target;
@@ -336,7 +348,7 @@ function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSp
       } else {
         level = initial + (target - initial) * (elapsed / duration);
       }
-      if (duration > 0) break;
+      break;
     }
     return sample * level;
   });
