@@ -68,6 +68,18 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     });
   }
 
+  const gate = ports.find((port) => port.name === "gate");
+  if (gate) {
+    const source = sources[gate.name];
+    handles.push(inputHandle(gate, rowPortTop(rows.length)));
+    rows.push(
+      <div key={gate.name} className="param modulated">
+        <div className="param-top"><span>{gate.label}</span><span>Opens above 0</span></div>
+        {source && <p className="param-note" title={source.label}>from {source.label}</p>}
+      </div>,
+    );
+  }
+
   descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");

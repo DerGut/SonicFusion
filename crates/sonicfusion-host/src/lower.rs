@@ -96,6 +96,20 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
                 let weights: Vec<_> = weights.iter().map(|weight| num(*weight)).collect();
                 format!("mix([{}], [{}])", refs.join(", "), weights.join(", "))
             }
+            NodeKind::Envelope {
+                attack_seconds,
+                decay_seconds,
+                sustain_level,
+                release_seconds,
+            } => format!(
+                "envelope({}, {}, {}, {}, {}, {})",
+                var(&input(id, "in").map_err(one)?),
+                var(&input(id, "gate").map_err(one)?),
+                num(*attack_seconds),
+                num(*decay_seconds),
+                num(*sustain_level),
+                num(*release_seconds),
+            ),
             NodeKind::Output {} => {
                 let from = input(id, "in").map_err(one)?;
                 writeln!(lowered.source, "{} -> out", var(&from)).unwrap();

@@ -191,8 +191,9 @@ impl Engine {
             .map_err(|error| HostError::Engine(format!("probe task failed: {error}")))?
     }
 
-    /// Long enough for the slowest one-pole filter feeding `node` to settle
-    /// (eight time constants), within fixed bounds.
+    /// Allow the slowest upstream filter or envelope to settle before the probe,
+    /// within a fixed budget. Long stages and recent edits can still make a
+    /// live probe differ from the state currently carried by the device stream.
     fn warmup_frames(&self, graph: &GraphSpec, node: &NodeId) -> u64 {
         let rate = f64::from(self.inner.config.sample_rate_hz());
         let modulation = self.info().cutoff_modulation;
@@ -217,12 +218,33 @@ impl Engine {
                 _ => None,
             })
             .fold(f64::INFINITY, f64::min);
+        let filter_settle = if slowest_hz.is_finite() && slowest_hz > 0.0 {
+            (8.0 * rate / (2.0 * std::f64::consts::PI * slowest_hz)).ceil()
+        } else {
+            0.0
+        };
+        let envelope_settle = graph
+            .nodes
+            .iter()
+            .filter(|spec| upstream.contains(&spec.id))
+            .filter_map(|spec| match spec.kind {
+                NodeKind::Envelope {
+                    attack_seconds,
+                    decay_seconds,
+                    release_seconds,
+                    ..
+                } => Some(
+                    [attack_seconds, decay_seconds, release_seconds]
+                        .into_iter()
+                        .map(|seconds| (seconds * rate).ceil())
+                        .sum(),
+                ),
+                _ => None,
+            })
+            .fold(0.0, f64::max);
         let max = MAX_WARMUP_SECONDS * u64::from(self.inner.config.sample_rate_hz());
-        if !slowest_hz.is_finite() || slowest_hz <= 0.0 {
-            return MIN_WARMUP_FRAMES;
-        }
-        let settle = (8.0 * rate / (2.0 * std::f64::consts::PI * slowest_hz)).ceil() as u64;
-        settle.clamp(MIN_WARMUP_FRAMES, max)
+        (filter_settle.max(envelope_settle) as u64)
+            .clamp(MIN_WARMUP_FRAMES, max.max(MIN_WARMUP_FRAMES))
     }
 
     pub(crate) fn config(&self) -> ExecutionConfig {
@@ -345,6 +367,61 @@ mod tests {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0, f32::max);
         assert!(error < 1e-3, "max deviation {error}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn envelope_probe_warms_up_and_reports_invalid_parameters_and_missing_gate() {
+        let engine = Engine::new().unwrap();
+        let mut graph: GraphSpec = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {"id": "src", "kind": "square", "params": {"frequency_hz": 0.0, "pulse_width": 1.0}},
+                {"id": "env", "kind": "envelope", "params": {
+                    "attack_seconds": 0.25, "decay_seconds": 0.125,
+                    "sustain_level": 0.5, "release_seconds": 0.15
+                }},
+                {"id": "out", "kind": "output", "params": {}}
+            ],
+            "wires": [
+                {"from": "src", "to": {"node": "env", "port": "in"}},
+                {"from": "env", "to": {"node": "out", "port": "in"}}
+            ]
+        }))
+        .unwrap();
+        let out = NodeId::new("out");
+        let gate = sonicfusion_graph_api::PortRef {
+            node: NodeId::new("env"),
+            port: "gate".into(),
+        };
+        let error = engine.probe(&graph, &out, 0, 16).await.unwrap_err();
+        assert!(
+            matches!(error, HostError::Invalid(issues) if issues.iter().any(|issue| issue.port.as_deref() == Some("gate")))
+        );
+        graph.wires.push(sonicfusion_graph_api::Wire {
+            from: NodeId::new("src"),
+            to: gate,
+        });
+
+        let samples = engine.probe(&graph, &out, 24_000, 256).await.unwrap();
+        assert_eq!(samples, vec![0.5; 256]);
+
+        graph.nodes[1].kind = NodeKind::Envelope {
+            attack_seconds: 0.02,
+            decay_seconds: -0.5,
+            sustain_level: 1.1,
+            release_seconds: 0.1,
+        };
+        let issues = engine.validate(&graph);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.param.as_deref() == Some("decay_seconds"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.param.as_deref() == Some("sustain_level"))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

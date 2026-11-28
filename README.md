@@ -38,6 +38,29 @@ deterministic per source and absolute frame, independent of render batch size.
 An optional unsigned 32-bit seed, `noise(seed)`, fixes a particular sequence.
 The editor assigns a seed from the node ID when lowering or exporting a patch.
 
+### ADSR envelope
+
+`envelope($audio, $gate, attack, decay, sustain, release)` multiplies the
+audio by a linear ADSR envelope. The audio can also be piped into the envelope:
+
+```text
+square(2, 0.5) -> $gate;
+sine(220) -> envelope($gate, 0.02, 0.1, 0.6, 0.15) -> gain(0.08) -> out
+```
+
+Attack, decay, and release are finite, nonnegative seconds. Sustain is a level
+between 0 and 1. The gate opens for positive samples and closes at zero or
+below. The first open sample starts attack toward 1 from the current level.
+While held, the envelope decays to sustain. A closing edge starts release from
+the current level toward zero. A new opening edge during release starts a new
+attack from the current level. Each nonzero ramp starts moving on its first
+frame and reaches its target after the stage duration rounded up to a whole
+number of frames. Zero-duration stages take no frames. The envelope starts
+closed at the execution origin, including after a live graph replacement.
+
+In the editor, connect the audio to **in** and a slow square oscillator to
+**Gate**. The node has one shaped audio output.
+
 ## Direct playback
 
 ```sh

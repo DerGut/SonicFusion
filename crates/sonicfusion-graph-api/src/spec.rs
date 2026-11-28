@@ -72,6 +72,12 @@ pub enum NodeKind {
     Mix {
         weights: Vec<f64>,
     },
+    Envelope {
+        attack_seconds: f64,
+        decay_seconds: f64,
+        sustain_level: f64,
+        release_seconds: f64,
+    },
     Output {},
 }
 
@@ -86,6 +92,7 @@ impl NodeKind {
             Self::Gain { .. } => "gain",
             Self::LowPass { .. } => "low_pass",
             Self::Mix { .. } => "mix",
+            Self::Envelope { .. } => "envelope",
             Self::Output {} => "output",
         }
     }
@@ -112,6 +119,14 @@ impl NodeKind {
                     name: "cutoff".into(),
                     signal: Signal::Control,
                     required: false,
+                },
+            ],
+            Self::Envelope { .. } => vec![
+                audio("in"),
+                InputPort {
+                    name: "gate".into(),
+                    signal: Signal::Control,
+                    required: true,
                 },
             ],
             Self::Mix { weights } => (0..weights.len())

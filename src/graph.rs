@@ -10,9 +10,9 @@ use datafusion::{
 use crate::{
     ExecutionConfig,
     physical::frame::{
-        Cutoff, FrameGainExec, FrameMixExec, FramePlan, FrameSawToothOscExec, FrameSineOscExec,
-        FrameSquareOscExec, FrameWhiteNoiseExec, low_pass, validate_constant_cutoff,
-        validate_frequency, validate_pulse_width,
+        Adsr, Cutoff, FrameEnvelopeExec, FrameGainExec, FrameMixExec, FramePlan,
+        FrameSawToothOscExec, FrameSineOscExec, FrameSquareOscExec, FrameWhiteNoiseExec, low_pass,
+        validate_constant_cutoff, validate_frequency, validate_pulse_width,
     },
 };
 
@@ -36,6 +36,11 @@ pub(crate) enum Node {
     Gain(NodeId, f32),
     LowPass(NodeId, PreparedCutoff),
     Mix(Vec<NodeId>, Vec<f32>),
+    Envelope {
+        audio: NodeId,
+        gate: NodeId,
+        adsr: Adsr,
+    },
 }
 
 pub(crate) struct GraphBuilder {
@@ -67,6 +72,7 @@ impl GraphBuilder {
             Node::LowPass(_, PreparedCutoff::ConstantHz(hz)) => {
                 validate_constant_cutoff(*hz, self.sample_rate_hz)?;
             }
+            Node::Envelope { adsr, .. } => adsr.validate()?,
             Node::Mix(inputs, gains)
                 if inputs.is_empty()
                     || inputs.len() != gains.len()
@@ -128,6 +134,12 @@ impl PreparedGraph {
                     low_pass(config, FramePlan::try_from_plan(config, input(id))?, cutoff)?
                         .into_plan()
                 }
+                Node::Envelope { audio, gate, adsr } => Arc::new(FrameEnvelopeExec::try_new(
+                    config,
+                    input(audio),
+                    input(gate),
+                    adsr,
+                )?),
                 Node::Mix(ids, gains) => Arc::new(FrameMixExec::try_new(
                     config,
                     ids.into_iter().map(input).collect(),

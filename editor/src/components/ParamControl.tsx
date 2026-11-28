@@ -22,6 +22,7 @@ export function fromSlider(descriptor: ParamDescriptor, position: number): numbe
 
 export function formatValue(descriptor: ParamDescriptor, value: number): string {
   if (descriptor.unit === "Hz") return formatHz(value);
+  if (descriptor.unit === "s") return `${Number(value.toPrecision(4))} s`;
   return value.toFixed(2);
 }
 

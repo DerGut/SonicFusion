@@ -157,6 +157,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in"];
     case "low_pass":
       return ["in"];
+    case "envelope":
+      return ["in", "gate"];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -215,6 +217,16 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
     if (!reachable.has(node.id)) {
       issues.push({ ...issue("unreachable", node.id, "not connected to the output; it won't be played"), severity: "warning" });
     }
+    if (node.kind === "envelope" && reachable.has(node.id)) {
+      for (const name of ["attack_seconds", "decay_seconds", "sustain_level", "release_seconds"]) {
+        const value = node.params[name];
+        const sustain = name === "sustain_level";
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || (sustain && value > 1)) {
+          const message = sustain ? "sustain must be between 0 and 1" : `${name.split("_")[0]} must be a finite nonnegative time`;
+          issues.push({ ...issue("invalid_parameter", node.id, message), param: name });
+        }
+      }
+    }
     for (const name of ["frequency_hz", "cutoff_hz"]) {
       const value = node.params[name];
       if (typeof value === "number" && value >= INFO.sample_rate_hz / 2) {
@@ -225,7 +237,7 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
   return issues;
 }
 
-/** A rough stateless model of the engine's nodes; good enough to draw. */
+/** A rough model of the engine's nodes for drawing a probe. */
 function render(graph: GraphSpec, root: string, start: number, frames: number): number[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
@@ -241,6 +253,11 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
       return from ? signal(from) : new Float32Array(frames);
     };
     const p = (name: string) => Number(node?.params[name] ?? 0);
+    if (node?.kind === "envelope") {
+      const samples = envelopeSamples(input("in"), input("gate"), node.params);
+      cache.set(id, samples);
+      return samples;
+    }
     const noiseKey = mix32(seeds.get(id) ?? 0);
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
@@ -282,6 +299,47 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     return out;
   };
   return Array.from(signal(root));
+}
+
+function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSpec["params"]): Float32Array {
+  type Stage = "attack" | "decay" | "sustain" | "release" | "idle";
+  const frames = (name: string) => Math.ceil(Number(params[name]) * INFO.sample_rate_hz);
+  const attack = frames("attack_seconds");
+  const decay = frames("decay_seconds");
+  const sustain = Number(params.sustain_level);
+  const release = frames("release_seconds");
+  let open = false;
+  let level = 0;
+  let initial = 0;
+  let elapsed = 0;
+  let stage: Stage = "idle";
+
+  const enter = (next: Stage) => {
+    stage = next;
+    initial = level;
+    elapsed = 0;
+  };
+  return audio.map((sample, index) => {
+    const nextOpen = gate[index] > 0;
+    if (nextOpen !== open) {
+      open = nextOpen;
+      enter(open ? "attack" : "release");
+    }
+    while (stage !== "idle" && stage !== "sustain") {
+      const duration = stage === "attack" ? attack : stage === "decay" ? decay : release;
+      const target = stage === "attack" ? 1 : stage === "decay" ? sustain : 0;
+      const next = stage === "attack" ? "decay" : stage === "decay" ? "sustain" : "idle";
+      elapsed += 1;
+      if (elapsed >= duration) {
+        level = target;
+        enter(next);
+      } else {
+        level = initial + (target - initial) * (elapsed / duration);
+      }
+      if (duration > 0) break;
+    }
+    return sample * level;
+  });
 }
 
 function noiseSeeds(nodes: ReadonlyMap<string, NodeSpec>): Map<string, number> {
