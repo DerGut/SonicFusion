@@ -317,7 +317,11 @@ mod tests {
     fn commands_speak_the_graph_api_json() {
         let (_app, webview) = webview();
         let catalog = call(&webview, "catalog", json!({})).unwrap();
-        assert_eq!(catalog.as_array().unwrap().len(), 7);
+        let expected_catalog: Value = serde_json::from_str(include_str!(
+            "../../../crates/sonicfusion-graph-api/fixtures/catalog.json"
+        ))
+        .unwrap();
+        assert_eq!(catalog, expected_catalog);
         assert_eq!(
             call(&webview, "session_info", json!({})).unwrap()["sample_rate_hz"],
             48_000

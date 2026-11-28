@@ -5,6 +5,7 @@ export type NodeKind =
   | "sine"
   | "square"
   | "sawtooth"
+  | "noise"
   | "gain"
   | "low_pass"
   | "mix"

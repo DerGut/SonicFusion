@@ -579,7 +579,7 @@ fn param_problems(
                 problems.push(("weights", "mix weights must be finite numbers".into()));
             }
         }
-        NodeKind::Output {} => {}
+        NodeKind::Noise {} | NodeKind::Output {} => {}
     }
     problems
 }

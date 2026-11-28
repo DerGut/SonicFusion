@@ -12,7 +12,7 @@ After the first build, run `target/debug/preview --graph examples/graphs/two-ton
 directly to try edits without invoking Cargo.
 
 The graph language supports `sine(frequency)`, `square(frequency, pulse_width)`, `sawtooth(frequency)`,
-`lpf(cutoff)`, `gain(factor)`, `mix(inputs, weights)`, and `out`.
+`noise()`, `lpf(cutoff)`, `gain(factor)`, `mix(inputs, weights)`, and `out`.
 `->` passes the previous node to a filter or gain. A `$name` at the end of a
 statement saves its output for later statements; references must be defined
 before use. For example:
@@ -32,6 +32,11 @@ wrapping to -1 each cycle. Frequency is in hertz, must be nonnegative and below
 Nyquist, and zero holds -1. The Rust API is
 `FrameSawToothOscExec::try_new(&config, frequency_hz)` in `physical::frame`.
 Like the square oscillator, the sawtooth is not band-limited.
+
+The Noise node and `noise()` generate mono white noise in [-1, 1]. Output is
+deterministic per source and absolute frame, independent of render batch size.
+An optional unsigned 32-bit seed, `noise(seed)`, fixes a particular sequence.
+The editor assigns a seed from the node ID when lowering or exporting a patch.
 
 ## Direct playback
 

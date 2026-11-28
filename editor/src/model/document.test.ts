@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import catalogJson from "../../../crates/sonicfusion-graph-api/fixtures/catalog.json";
 import studioPatch from "../../../crates/sonicfusion-graph-api/fixtures/studio-patch.json";
+import { MockEngine } from "../api/mock";
 import type { GraphSpec, NodeDescriptor } from "../api/types";
 import {
   addConnectedNode,
@@ -72,6 +73,38 @@ describe("document", () => {
     const node = withMix.nodes.find((candidate) => candidate.id === mix)!;
     expect(node.params.weights).toEqual([0.5, 0.5]);
     expect(inputPorts(node, catalog).map((port) => port.name)).toEqual(["in.0", "in.1"]);
+  });
+
+  it("saves, reopens and probes a patch with a Noise source", async () => {
+    const [withNoise, id] = addNode(studio(), catalog, "noise", { x: 0, y: 0 });
+    const source = withNoise.nodes.find((node) => node.id === id)!;
+    expect(source.params).toEqual({});
+    expect(inputPorts(source, catalog)).toEqual([]);
+    const doc = connect(withNoise, id, { node: "out", port: "in" });
+    const reopened = parseDocument(JSON.stringify(doc));
+    const graph = toGraph(reopened);
+    expect(reopened).toEqual(doc);
+    const engine = new MockEngine();
+    expect((await engine.validate(graph)).every((issue) => issue.severity !== "error")).toBe(true);
+    const sourceProbe = await engine.probe(graph, id, 256);
+    const outputProbe = await engine.probe(graph, "out", 256);
+    expect(outputProbe.samples).toEqual(sourceProbe.samples);
+    expect(outputProbe.samples.some((sample) => sample < -0.5)).toBe(true);
+    expect(outputProbe.samples.some((sample) => sample > 0.5)).toBe(true);
+  });
+
+  it("keeps mock Noise sources distinct when their node IDs hash to the same value", async () => {
+    const graph = toGraph(studio());
+    graph.nodes.push(
+      { id: "liquid", kind: "noise", params: {} },
+      { id: "costarring", kind: "noise", params: {} },
+    );
+    const engine = new MockEngine();
+    const first = await engine.probe(graph, "liquid", 64);
+    const second = await engine.probe(graph, "costarring", 64);
+    expect(first.samples).not.toEqual(second.samples);
+    const reordered = { ...graph, nodes: [...graph.nodes].reverse() };
+    expect((await engine.probe(reordered, "liquid", 64)).samples).toEqual(first.samples);
   });
 
   it("replaces the wire into a used input", () => {

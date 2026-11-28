@@ -59,6 +59,7 @@ pub enum NodeKind {
     Sawtooth {
         frequency_hz: f64,
     },
+    Noise {},
     Gain {
         factor: f64,
     },
@@ -81,6 +82,7 @@ impl NodeKind {
             Self::Sine { .. } => "sine",
             Self::Square { .. } => "square",
             Self::Sawtooth { .. } => "sawtooth",
+            Self::Noise {} => "noise",
             Self::Gain { .. } => "gain",
             Self::LowPass { .. } => "low_pass",
             Self::Mix { .. } => "mix",
@@ -100,7 +102,9 @@ impl NodeKind {
             required: true,
         };
         match self {
-            Self::Sine { .. } | Self::Square { .. } | Self::Sawtooth { .. } => Vec::new(),
+            Self::Sine { .. } | Self::Square { .. } | Self::Sawtooth { .. } | Self::Noise {} => {
+                Vec::new()
+            }
             Self::Gain { .. } | Self::Output {} => vec![audio("in")],
             Self::LowPass { .. } => vec![
                 audio("in"),

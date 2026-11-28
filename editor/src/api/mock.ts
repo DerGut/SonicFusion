@@ -230,6 +230,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const feeds = new Map(graph.wires.map((wire) => [`${wire.to.node}:${wire.to.port}`, wire.from]));
   const cache = new Map<string, Float32Array>();
+  const seeds = noiseSeeds(byId);
   const signal = (id: string): Float32Array => {
     const cached = cache.get(id);
     if (cached) return cached;
@@ -240,6 +241,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
       return from ? signal(from) : new Float32Array(frames);
     };
     const p = (name: string) => Number(node?.params[name] ?? 0);
+    const noiseKey = mix32(seeds.get(id) ?? 0);
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
       const phase = (p("frequency_hz") * t) % 1;
@@ -252,6 +254,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           break;
         case "sawtooth":
           out[n] = 2 * phase - 1;
+          break;
+        case "noise":
+          out[n] = whiteNoise(start + n, noiseKey);
           break;
         case "gain":
           out[n] = clamp(input("in")[n] * p("factor"));
@@ -277,6 +282,39 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     return out;
   };
   return Array.from(signal(root));
+}
+
+function noiseSeeds(nodes: ReadonlyMap<string, NodeSpec>): Map<string, number> {
+  const ids = Array.from(nodes.values())
+    .filter((node) => node.kind === "noise")
+    .map((node) => node.id)
+    .sort();
+  const used = new Set<number>();
+  const seeds = new Map<string, number>();
+  const encoder = new TextEncoder();
+  for (const id of ids) {
+    let hash = 0x811c9dc5;
+    for (const byte of encoder.encode(id)) {
+      hash = Math.imul(hash ^ byte, 0x01000193);
+    }
+    let seed = hash >>> 0;
+    while (used.has(seed)) seed = (seed + 1) >>> 0;
+    used.add(seed);
+    seeds.set(id, seed);
+  }
+  return seeds;
+}
+
+// Hash the absolute position so overlapping mock probes draw the same signal.
+function whiteNoise(frame: number, key: number): number {
+  const counter = frame ^ Math.imul(Math.floor(frame / 2 ** 32), 0x9e3779b9);
+  return (mix32(counter ^ key) >>> 8) / 2 ** 23 - 1;
+}
+
+function mix32(value: number): number {
+  value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
+  value = Math.imul(value ^ (value >>> 15), 0x735a2d97);
+  return (value ^ (value >>> 15)) >>> 0;
 }
 
 function clamp(value: number) {
