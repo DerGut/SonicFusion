@@ -288,6 +288,12 @@ export function parseDocument(text: string): EditorDocument {
     ) {
       throw new Error("project has a malformed node");
     }
+    if (candidate.kind === "low_pass" && Object.hasOwn(candidate.params, "mix")) {
+      // Early Dry/Wet drafts called this "mix"; keep the edited ratio on reload.
+      const { mix, ...params } = candidate.params;
+      if (!Object.hasOwn(params, "wet")) params.wet = mix;
+      candidate.params = params;
+    }
   }
   for (const wire of value.wires as unknown[]) {
     const candidate = wire as Partial<Wire> | null;

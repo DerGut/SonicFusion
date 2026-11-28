@@ -85,7 +85,7 @@
     "kind": "low_pass",
     "label": "Low-pass",
     "category": "filter",
-    "signature": "lpf(cutoff, mix?)",
+    "signature": "lpf(cutoff, wet?)",
     "inputs": [
       {
         "name": "in",
@@ -114,8 +114,8 @@
         "frequency": "cutoff"
       },
       {
-        "name": "mix",
-        "label": "Mix",
+        "name": "wet",
+        "label": "Dry/Wet",
         "unit": "%",
         "min": 0.0,
         "max": 1.0,

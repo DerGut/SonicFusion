@@ -44,7 +44,7 @@ async fn blends_two_tones_with_fixed_or_modulated_cutoff_across_batches() {
             let mut mixed = graph.clone();
             mixed.nodes[filter_index].kind = NodeKind::LowPass {
                 cutoff_hz: 1_200.0,
-                mix: 0.0,
+                wet: 0.0,
             };
             assert_eq!(
                 engine
@@ -56,7 +56,7 @@ async fn blends_two_tones_with_fixed_or_modulated_cutoff_across_batches() {
 
             mixed.nodes[filter_index].kind = NodeKind::LowPass {
                 cutoff_hz: 1_200.0,
-                mix: 0.375,
+                wet: 0.375,
             };
             assert!(engine.lower(&mixed).unwrap().source.contains(", 0.375)"));
             let samples = engine
@@ -73,7 +73,7 @@ async fn blends_two_tones_with_fixed_or_modulated_cutoff_across_batches() {
 
             mixed.nodes[filter_index].kind = NodeKind::LowPass {
                 cutoff_hz: 1_200.0,
-                mix: 1.0,
+                wet: 1.0,
             };
             assert_eq!(mixed, graph, "legacy patches default to fully wet");
         }

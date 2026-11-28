@@ -99,7 +99,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             kind: "low_pass".into(),
             label: "Low-pass".into(),
             category: Category::Filter,
-            signature: "lpf(cutoff, mix?)".into(),
+            signature: "lpf(cutoff, wet?)".into(),
             inputs: vec![
                 audio_in("in", "in"),
                 PortDescriptor {
@@ -115,7 +115,7 @@ pub fn catalog() -> Vec<NodeDescriptor> {
                 hz("cutoff_hz", "Cutoff", 1_200.0, 20.0, FrequencyParam::Cutoff),
                 ParamDescriptor {
                     unit: Some("%".into()),
-                    ..ratio("mix", "Mix", 1.0)
+                    ..ratio("wet", "Dry/Wet", 1.0)
                 },
             ],
         },
@@ -181,7 +181,7 @@ pub fn default_kind(kind: &str) -> Option<NodeKind> {
         "noise" => NodeKind::Noise {},
         "low_pass" => NodeKind::LowPass {
             cutoff_hz: param("cutoff_hz")?,
-            mix: param("mix")?,
+            wet: param("wet")?,
         },
         "gain" => NodeKind::Gain {
             factor: param("factor")?,

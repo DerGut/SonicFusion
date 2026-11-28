@@ -555,7 +555,7 @@ fn param_problems(
                 problems.push(("pulse_width", "pulse width must be between 0 and 1".into()));
             }
         }
-        NodeKind::LowPass { cutoff_hz, mix } => {
+        NodeKind::LowPass { cutoff_hz, wet } => {
             // A wired cutoff port replaces the constant, which the engine ignores.
             if !cutoff_wired {
                 problems.extend(frequency_problem(
@@ -566,8 +566,8 @@ fn param_problems(
                     session,
                 ));
             }
-            if !(0.0..=1.0).contains(mix) {
-                problems.push(("mix", "low-pass mix must be between 0% and 100%".into()));
+            if !(0.0..=1.0).contains(wet) {
+                problems.push(("wet", "Dry/Wet must be between 0% and 100%".into()));
             }
         }
         NodeKind::Gain { factor } => {
@@ -755,7 +755,7 @@ mod tests {
             "lpf",
             NodeKind::LowPass {
                 cutoff_hz: 0.0,
-                mix: 1.0,
+                wet: 1.0,
             },
         ));
         graph
@@ -768,7 +768,7 @@ mod tests {
             wire("gain", "out", "in"),
         ];
         assert!(validate(&graph, &session()).is_empty());
-        for mix in [-0.1, 1.1, f64::NAN] {
+        for wet in [-0.1, 1.1, f64::NAN] {
             let mut invalid = graph.clone();
             invalid
                 .nodes
@@ -777,11 +777,11 @@ mod tests {
                 .unwrap()
                 .kind = NodeKind::LowPass {
                 cutoff_hz: 0.0,
-                mix,
+                wet,
             };
             let issues = validate(&invalid, &session());
             assert_eq!(issues.len(), 1);
-            assert_eq!(issues[0].param.as_deref(), Some("mix"));
+            assert_eq!(issues[0].param.as_deref(), Some("wet"));
             assert_eq!(issues[0].severity, Error);
         }
         graph.wires.remove(1);
@@ -844,7 +844,7 @@ mod tests {
                     "cut",
                     NodeKind::LowPass {
                         cutoff_hz: 0.0,
-                        mix: 1.0,
+                        wet: 1.0,
                     },
                 ),
                 node("nan", NodeKind::Gain { factor: f64::NAN }),

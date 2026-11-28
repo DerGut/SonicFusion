@@ -71,6 +71,10 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
   const partialPitch = view === "spectrum" && partial?.canNamePitch ? pitchFromHz(partial.hz) : null;
   const partialLabel = partial ? (partial.canNamePitch ? "" : "≈") + formatHz(partial.hz) : "—";
   const cutoff = lowPassMarker(graph, node, session);
+  const wet = node.params.wet ?? 1;
+  const dryFloor = view === "spectrum" && cutoff && typeof wet === "number" && wet >= 0 && wet < 1
+    ? formatDb(20 * Math.log10(1 - wet))
+    : null;
 
   return (
     <section className="probe" aria-label="Signal probe">
@@ -115,6 +119,11 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
             <dt>Strongest partial</dt>
             <dd>{partialLabel}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
           </div>
+          {dryFloor && (
+            <div title="Asymptotic floor set by the dry signal well above the cutoff">
+              <dt>Above cutoff</dt><dd>{dryFloor} floor</dd>
+            </div>
+          )}
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
           <div><dt>Window</dt><dd>{PROBE_FRAMES} frames</dd></div>
         </dl>

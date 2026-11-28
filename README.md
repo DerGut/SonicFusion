@@ -27,9 +27,10 @@ mix([$high, $low], [0.4, 0.6]) -> out
 `$high -> gain(0.5)`. `out` applies the final frame limit from `RenderConfig`,
 which the preview command derives from `--seconds`.
 
-The Low-pass node's Mix slider blends the dry input with the filtered output.
-In the DSL, `lpf(cutoff, mix)` takes a wet ratio from 0 to 1. It defaults to
-1 (fully wet) in both the DSL and saved patches. For example,
+The Low-pass node's Dry/Wet slider blends the dry input with the filtered output.
+The dry signal sets the asymptotic floor well above the cutoff, which the
+spectrum shows below 100% wet. In the DSL, `lpf(cutoff, wet)` takes a wet ratio
+from 0 to 1. It defaults to 1 (fully wet) in both the DSL and saved patches. For example,
 `sine(440) -> lpf(500, 0.25) -> out` uses 25% filtered signal. The ratio also
 works with a wired cutoff, as in `lpf($audio, $cutoff, 0.25)`.
 

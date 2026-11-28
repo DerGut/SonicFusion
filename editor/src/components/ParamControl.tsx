@@ -22,7 +22,10 @@ export function fromSlider(descriptor: ParamDescriptor, position: number): numbe
 
 export function formatValue(descriptor: ParamDescriptor, value: number): string {
   if (descriptor.unit === "Hz") return formatHz(value);
-  if (descriptor.unit === "%") return Number((value * 100).toFixed(1)) + "%";
+  if (descriptor.unit === "%") {
+    const suffix = descriptor.name === "wet" ? "% wet" : "%";
+    return Number((value * 100).toFixed(1)) + suffix;
+  }
   return value.toFixed(2);
 }
 

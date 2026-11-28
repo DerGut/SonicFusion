@@ -215,11 +215,11 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
     if (!reachable.has(node.id)) {
       issues.push({ ...issue("unreachable", node.id, "not connected to the output; it won't be played"), severity: "warning" });
     }
-    const mix = node.params.mix;
-    if (node.kind === "low_pass" && mix !== undefined && (typeof mix !== "number" || !(mix >= 0 && mix <= 1))) {
+    const wet = node.params.wet ?? node.params.mix;
+    if (node.kind === "low_pass" && wet !== undefined && (typeof wet !== "number" || !(wet >= 0 && wet <= 1))) {
       issues.push({
-        ...issue("invalid_parameter", node.id, "low-pass mix must be between 0% and 100%"),
-        param: "mix",
+        ...issue("invalid_parameter", node.id, "Dry/Wet must be between 0% and 100%"),
+        param: "wet",
         severity: reachable.has(node.id) ? "error" : "warning",
       });
     }
@@ -250,7 +250,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     };
     const p = (name: string) => Number(node?.params[name] ?? 0);
     const noiseKey = mix32(seeds.get(id) ?? 0);
-    const lowPassMix = Number(node?.params.mix ?? 1);
+    const wetRatio = Number(node?.params.wet ?? node?.params.mix ?? 1);
     let wet = 0;
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
@@ -285,9 +285,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           const a = 1 - Math.exp((-2 * Math.PI * cutoff) / INFO.sample_rate_hz);
           const dry = input("in")[n];
           wet = Math.fround(wet * (1 - a) + a * dry);
-          if (lowPassMix === 0) out[n] = dry;
-          else if (lowPassMix === 1) out[n] = wet;
-          else out[n] = (1 - lowPassMix) * dry + lowPassMix * wet;
+          if (wetRatio === 0) out[n] = dry;
+          else if (wetRatio === 1) out[n] = wet;
+          else out[n] = (1 - wetRatio) * dry + wetRatio * wet;
           break;
         }
       }
