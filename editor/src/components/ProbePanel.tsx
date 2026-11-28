@@ -138,12 +138,10 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onRen
         </div>
         <dl className="readouts">
           <div><dt>Peak</dt><dd>{displayed ? `${formatDb(peak > 0 ? 20 * Math.log10(peak) : null)}FS` : "—"}</dd></div>
-          {slowSeconds === null && (
-            <div>
-              <dt>Strongest partial</dt>
-              <dd>{partialLabel}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
-            </div>
-          )}
+          <div hidden={slowSeconds !== null}>
+            <dt>Strongest partial</dt>
+            <dd>{partialLabel}{partialPitch && " · " + noteName(partialPitch.midi)}</dd>
+          </div>
           {cutoff && <div><dt>Cutoff</dt><dd>{cutoff.label}</dd></div>}
           <div><dt>Window</dt><dd>{slowSeconds === null ? PROBE_FRAMES : slowFrames} frames</dd></div>
         </dl>

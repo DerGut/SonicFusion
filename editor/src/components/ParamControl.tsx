@@ -42,11 +42,18 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
   const [typing, setTyping] = useState<string | null>(null);
   const position = toSlider(descriptor, value);
   const commit = () => {
-    if (typing?.trim()) {
-      const suffix = descriptor.unit === "s" ? typing.match(/^(.+?)\s*(ms|s)\s*$/i) : null;
-      const parsed = suffix ? Number(suffix[1]) / (suffix[2].toLowerCase() === "ms" ? 1_000 : 1) : Number(typing);
-      if (Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
+    const parsed = Number(typing);
+    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
+    setTyping(null);
+  };
+  const commitTyped = () => {
+    const suffix = descriptor.unit === "s" ? typing?.match(/^(.+?)\s*(ms|s)\s*$/i) : null;
+    if (!suffix) {
+      commit();
+      return;
     }
+    const duration = Number(suffix[1]) / (suffix[2].toLowerCase() === "ms" ? 1_000 : 1);
+    if (Number.isFinite(duration) && duration !== value) onChange(duration, false);
     setTyping(null);
   };
   return (
@@ -56,15 +63,15 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
         {typing === null ? (
           <button type="button" className="value nodrag" title="Click to type a value"
             aria-label={`${label ?? descriptor.label}: ${formatValue(descriptor, value)}. Type a value`}
-            onClick={() => setTyping(descriptor.unit === "s" ? `${value} s` : String(value))}>
+            onClick={() => setTyping(String(value))}>
             {formatValue(descriptor, value)}
           </button>
         ) : (
           <input className="value-input nodrag" autoFocus aria-label={`${label ?? descriptor.label} value`}
             onFocus={(event) => event.target.select()}
-            value={typing} onChange={(event) => setTyping(event.target.value)} onBlur={commit}
+            value={typing} onChange={(event) => setTyping(event.target.value)} onBlur={commitTyped}
             onKeyDown={(event) => {
-              if (event.key === "Enter") commit();
+              if (event.key === "Enter") commitTyped();
               if (event.key === "Escape") setTyping(null);
             }} />
         )}
