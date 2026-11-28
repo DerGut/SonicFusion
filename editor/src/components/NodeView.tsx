@@ -18,6 +18,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const portIssue = (port: string) => errors.find((issue) => issue.port === port)?.message;
   const paramIssue = (param: string) => errors.find((issue) => issue.param === param)?.message;
   const audioIn = ports.find((port) => port.name === "in");
+  const frequencyIn = ports.find((port) => port.name === "frequency");
   const className = [
     "sf-node",
     selected && "selected",
@@ -113,7 +114,11 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
         <span className="sf-node-kind">{descriptor.signature.split("(")[0]}</span>
       </div>
       <div className="sf-node-io">
-        <span>{audioIn ? "in" : ""}</span>
+        {frequencyIn ? (
+          <span title="Control −1 halves the base frequency, 0 leaves it alone, and +1 doubles it. The result stays below Nyquist.">
+            FM ±1 octave
+          </span>
+        ) : <span>{audioIn ? "in" : ""}</span>}
         <span>{descriptor.has_output ? "out" : node.kind === "output" ? "mono → device" : ""}</span>
       </div>
       {rows}
@@ -131,6 +136,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
         <p className={`sf-node-issue ${errors[0] ? "error" : "warning"}`}>{(errors[0] ?? warning)!.message}</p>
       )}
       {audioIn && inputHandle(audioIn, IO_PORT_TOP)}
+      {frequencyIn && inputHandle(frequencyIn, IO_PORT_TOP)}
       {handles}
       {descriptor.has_output && (
         <Handle id="out" type="source" position={Position.Right} className="port audio connected"

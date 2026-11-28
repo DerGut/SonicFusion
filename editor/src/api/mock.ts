@@ -150,6 +150,11 @@ function issue(code: string, node: string | null, message: string, port: string 
   return { severity: "error", code, node, port, param: null, message };
 }
 
+function optionalInputs(node: NodeSpec) {
+  const descriptor = catalogJson.find(candidate => candidate.kind === node.kind);
+  return descriptor?.inputs.filter(port => !port.required) ?? [];
+}
+
 function inputNames(node: NodeSpec): string[] {
   switch (node.kind) {
     case "gain":
@@ -181,8 +186,10 @@ function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
       if (from) pending.push(from);
       else issues.push(issue("missing_input", id, `input "${port}" is not connected`, port));
     }
-    const cutoff = feeds.get(`${id}:cutoff`);
-    if (cutoff) pending.push(cutoff);
+    for (const { name } of optionalInputs(spec)) {
+      const from = feeds.get(`${id}:${name}`);
+      if (from) pending.push(from);
+    }
   }
   return issues;
 }
@@ -208,8 +215,10 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
       if (from) pending.push(from);
       else issues.push(issue("missing_input", id, `input "${port}" is not connected`, port));
     }
-    const cutoff = feeds.get(`${id}:cutoff`);
-    if (cutoff) pending.push(cutoff);
+    for (const { name } of optionalInputs(node)) {
+      const from = feeds.get(`${id}:${name}`);
+      if (from) pending.push(from);
+    }
   }
   for (const node of graph.nodes) {
     if (!reachable.has(node.id)) {
@@ -240,6 +249,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
       const from = feeds.get(`${id}:${port}`);
       return from ? signal(from) : new Float32Array(frames);
     };
+    const sawControl = node?.kind === "sawtooth" && feeds.has(`${id}:frequency`) ? input("frequency") : null;
+    const baseHz = Number(node?.params.frequency_hz ?? 0);
+    let sawPhase = (start * baseHz / INFO.sample_rate_hz) % 1;
     const p = (name: string) => Number(node?.params[name] ?? 0);
     const noiseKey = mix32(seeds.get(id) ?? 0);
     for (let n = 0; n < frames && node; n++) {
@@ -253,7 +265,12 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
           out[n] = phase < p("pulse_width") ? 1 : -1;
           break;
         case "sawtooth":
-          out[n] = 2 * phase - 1;
+          out[n] = 2 * (sawControl ? sawPhase : phase) - 1;
+          if (sawControl) {
+            const nyquist = INFO.sample_rate_hz / 2 * (1 - Number.EPSILON / 2);
+            const hz = Math.min(baseHz * 2 ** sawControl[n], nyquist);
+            sawPhase = (sawPhase + hz / INFO.sample_rate_hz) % 1;
+          }
           break;
         case "noise":
           out[n] = whiteNoise(start + n, noiseKey);

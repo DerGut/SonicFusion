@@ -97,8 +97,8 @@ export function addNode(
 }
 
 /**
- * Add `kind` at `position` and wire `from` into its first audio input. The
- * output node is unique, so picking it rewires the existing one instead.
+ * Add `kind` at `position` and wire `from` into its first audio input or its
+ * sole control input. Picking the output rewires the existing one.
  * Returns the node that received the wire.
  */
 export function addConnectedNode(
@@ -114,7 +114,8 @@ export function addConnectedNode(
   }
   const [added, id] = addNode(doc, catalog, kind, position);
   const node = added.nodes.find((candidate) => candidate.id === id)!;
-  const first = inputPorts(node, catalog).find((port) => port.signal === "audio");
+  const ports = inputPorts(node, catalog);
+  const first = ports.find((port) => port.signal === "audio") ?? (ports.length === 1 ? ports[0] : undefined);
   return [from && first ? connect(added, from, { node: id, port: first.name }) : added, id];
 }
 

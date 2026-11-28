@@ -2,56 +2,134 @@ use std::sync::Arc;
 
 use datafusion::{
     arrow::array::{Float32Array, RecordBatch, UInt64Array},
-    error::DataFusionError,
+    error::{DataFusionError, Result},
+    execution::{SendableRecordBatchStream, TaskContext},
     physical_expr::EquivalenceProperties,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
+        DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
+        Partitioning, PlanProperties,
         execution_plan::{Boundedness, EmissionType},
         stream::RecordBatchStreamAdapter,
     },
 };
 
-use crate::{ExecutionConfig, dsp, layout::frame::frame_schema};
+use futures::StreamExt;
 
-/// Generates an unbounded frame stream of bipolar rising sawtooth samples.
+use crate::{ExecutionConfig, FrameDecoder, dsp, layout::frame::frame_schema};
+
+use super::FramePlan;
+
+/// Generates a frame stream of bipolar rising sawtooth samples.
 /// Each cycle starts at -1 and rises toward +1 before wrapping back to -1.
 /// Frequency is configurable in hertz; zero frequency holds -1.
 /// Like the square oscillator, this waveform is not band-limited.
 #[derive(Debug)]
 pub struct FrameSawToothOscExec {
-    sample_rate_hz: u32,
+    config: ExecutionConfig,
     frequency_hz: f64,
-    batch_frame_capacity: usize,
-    start_frame: u64,
+    modulation: Option<Arc<dyn ExecutionPlan>>,
     properties: Arc<PlanProperties>,
 }
 
 impl FrameSawToothOscExec {
-    pub fn try_new(
+    pub fn try_new(config: &impl AsRef<ExecutionConfig>, frequency_hz: f64) -> Result<Self> {
+        Self::new(config.as_ref(), frequency_hz, None)
+    }
+
+    /// Drive frequency with a dense normalized control stream. Zero gives the
+    /// base frequency, and the endpoints shift it by an octave in either
+    /// direction. The frequency is capped just below Nyquist.
+    ///
+    /// Phase starts at the base frequency's phase at the execution origin.
+    /// Each control sample advances phase for the next frame.
+    pub fn try_new_modulated(
         config: &impl AsRef<ExecutionConfig>,
         frequency_hz: f64,
-    ) -> datafusion::error::Result<Self> {
-        let config = config.as_ref();
+        modulation: FramePlan,
+    ) -> Result<Self> {
+        let modulation = modulation.into_plan();
+        validate_modulation_partition(modulation.as_ref())?;
+        Self::new(config.as_ref(), frequency_hz, Some(modulation))
+    }
+
+    fn new(
+        config: &ExecutionConfig,
+        frequency_hz: f64,
+        modulation: Option<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Self> {
         super::validate_frequency(frequency_hz, config.sample_rate_hz(), "frequency_hz")?;
-        let mut equivalence = EquivalenceProperties::new(frame_schema(config));
+        let schema = frame_schema(config);
+        let (emission, boundedness) = if let Some(control) = &modulation {
+            if control.schema() != schema {
+                return Err(DataFusionError::Plan(
+                    "FrameSawToothOscExec modulation must match the execution frame schema".into(),
+                ));
+            }
+            (control.pipeline_behavior(), control.boundedness())
+        } else {
+            (
+                EmissionType::Incremental,
+                Boundedness::Unbounded {
+                    requires_infinite_memory: false,
+                },
+            )
+        };
+        let mut equivalence = EquivalenceProperties::new(schema);
         equivalence.add_ordering(super::frame_ordering());
         let properties = Arc::new(PlanProperties::new(
             equivalence,
             Partitioning::UnknownPartitioning(1),
-            EmissionType::Incremental,
-            Boundedness::Unbounded {
-                requires_infinite_memory: false,
-            },
+            emission,
+            boundedness,
         ));
 
         Ok(Self {
-            sample_rate_hz: config.sample_rate_hz(),
+            config: *config,
             frequency_hz,
-            batch_frame_capacity: config.batch_frame_capacity(),
-            start_frame: config.start_frame(),
+            modulation,
             properties,
         })
     }
+
+    fn execute_modulated(
+        &self,
+        control: &dyn ExecutionPlan,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        let mut decoder = FrameDecoder::continuous(&self.config);
+        let mut phase = dsp::ModulatedPhase::new(
+            self.config.start_frame(),
+            self.frequency_hz,
+            self.config.sample_rate_hz(),
+        );
+        let schema = self.schema();
+        let stream = control.execute(0, context)?.map(move |batch| {
+            let batch = batch?;
+            let controls = decoder.decode_batch(&batch).map_err(|error| {
+                DataFusionError::Execution(format!("sawtooth modulation: {error}"))
+            })?;
+            let output = Float32Array::from_iter_values(
+                controls
+                    .iter()
+                    .map(|&sample| (2.0 * phase.advance(sample) - 1.0) as f32),
+            );
+            RecordBatch::try_new(
+                batch.schema(),
+                vec![Arc::clone(batch.column(0)), Arc::new(output)],
+            )
+            .map_err(Into::into)
+        });
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+    }
+}
+
+fn validate_modulation_partition(control: &dyn ExecutionPlan) -> Result<()> {
+    if control.output_partitioning().partition_count() != 1 {
+        return Err(DataFusionError::Plan(
+            "FrameSawToothOscExec requires one modulation partition".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl ExecutionPlan for FrameSawToothOscExec {
@@ -64,39 +142,61 @@ impl ExecutionPlan for FrameSawToothOscExec {
     }
 
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-        vec![]
+        self.modulation.iter().collect()
+    }
+
+    fn required_input_distribution(&self) -> Vec<Distribution> {
+        self.modulation
+            .iter()
+            .map(|_| Distribution::SinglePartition)
+            .collect()
+    }
+
+    fn maintains_input_order(&self) -> Vec<bool> {
+        self.modulation.iter().map(|_| true).collect()
     }
 
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
-        if children.is_empty() {
-            Ok(self)
-        } else {
-            Err(DataFusionError::Internal(
-                "FrameSawToothOscExec has no children".to_string(),
-            ))
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if self.modulation.is_none() && children.is_empty() {
+            return Ok(self);
         }
+        if let (Some(_), [control]) = (&self.modulation, children.as_slice()) {
+            // The optimizer may introduce a multi-partition input before
+            // enforcing the required single-partition distribution.
+            return Ok(Arc::new(Self::new(
+                &self.config,
+                self.frequency_hz,
+                Some(Arc::clone(control)),
+            )?));
+        }
+        Err(DataFusionError::Internal(
+            "FrameSawToothOscExec replacement child count does not match the plan".into(),
+        ))
     }
 
     fn execute(
         &self,
         partition: usize,
-        _context: Arc<datafusion::execution::TaskContext>,
-    ) -> datafusion::error::Result<datafusion::execution::SendableRecordBatchStream> {
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
         if partition != 0 {
             return Err(DataFusionError::Execution(format!(
                 "FrameSawToothOscExec supports only partition 0, got {partition}"
             )));
         }
+        if let Some(control) = &self.modulation {
+            validate_modulation_partition(control.as_ref())?;
+            return self.execute_modulated(control.as_ref(), context);
+        }
 
         let schema = self.schema();
-        let batch_frame_capacity = self.batch_frame_capacity as u64;
-        let sample_rate_hz = self.sample_rate_hz;
+        let batch_frame_capacity = self.config.batch_frame_capacity() as u64;
+        let sample_rate_hz = self.config.sample_rate_hz();
         let frequency_hz = self.frequency_hz;
-
-        let start_frame = self.start_frame;
+        let start_frame = self.config.start_frame();
         let stream = async_stream::try_stream! {
             let mut next_frame = start_frame;
 
@@ -128,6 +228,13 @@ impl ExecutionPlan for FrameSawToothOscExec {
 
 impl DisplayAs for FrameSawToothOscExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.modulation.is_some() {
+            return write!(
+                f,
+                "FrameSawToothOscExec: base_frequency={}hz, modulation=±1 octave",
+                self.frequency_hz
+            );
+        }
         match t {
             DisplayFormatType::Default => {
                 write!(f, "FrameSawToothOscExec: frequency={}hz", self.frequency_hz)
@@ -135,12 +242,18 @@ impl DisplayAs for FrameSawToothOscExec {
             DisplayFormatType::Verbose => write!(
                 f,
                 "FrameSawToothOscExec: frequency={}hz, sample_rate={}hz, batch_frame_capacity={}",
-                self.frequency_hz, self.sample_rate_hz, self.batch_frame_capacity
+                self.frequency_hz,
+                self.config.sample_rate_hz(),
+                self.config.batch_frame_capacity()
             ),
             DisplayFormatType::TreeRender => {
                 writeln!(f, "frequency={}hz", self.frequency_hz)?;
-                writeln!(f, "sample_rate={}hz", self.sample_rate_hz)?;
-                write!(f, "batch_frame_capacity={}", self.batch_frame_capacity)
+                writeln!(f, "sample_rate={}hz", self.config.sample_rate_hz())?;
+                write!(
+                    f,
+                    "batch_frame_capacity={}",
+                    self.config.batch_frame_capacity()
+                )
             }
         }
     }
@@ -152,7 +265,7 @@ mod tests {
 
     use datafusion::{
         arrow::{
-            array::{Float32Array, UInt64Array},
+            array::{Float32Array, RecordBatch, UInt64Array},
             datatypes::DataType,
         },
         execution::TaskContext,
@@ -160,11 +273,15 @@ mod tests {
             ExecutionPlan, Partitioning, collect, displayable,
             execution_plan::{Boundedness, EmissionType},
             limit::GlobalLimitExec,
+            test::TestMemoryExec,
         },
     };
     use futures::{StreamExt, TryStreamExt};
 
-    use crate::{RenderConfig, physical::frame::FrameSawToothOscExec};
+    use crate::{
+        ExecutionConfig, FrameDecoder, RenderConfig, frame_schema,
+        physical::frame::{FramePlan, FrameSawToothOscExec, FrameSquareOscExec},
+    };
 
     #[test]
     fn sawtooth_source_validates_frequency() {
@@ -185,6 +302,72 @@ mod tests {
             .batch_frame_capacity(4)
             .build()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn frequency_control_advances_phase_across_batches() {
+        async fn samples(capacity: usize, start: u64, control_hz: f64, count: usize) -> Vec<f32> {
+            let config = ExecutionConfig::new(8, capacity).unwrap().at_frame(start);
+            let control = Arc::new(FrameSquareOscExec::try_new(&config, control_hz, 0.5).unwrap());
+            let modulation = FramePlan::try_from_plan(&config, control).unwrap();
+            let oscillator = Arc::new(
+                FrameSawToothOscExec::try_new_modulated(&config, 1.0, modulation).unwrap(),
+            );
+            let limit = Arc::new(GlobalLimitExec::new(oscillator, 0, Some(count)));
+            let batches = collect(limit, Arc::new(TaskContext::default()))
+                .await
+                .unwrap();
+            let mut decoder = FrameDecoder::continuous(&config);
+            let mut samples = Vec::new();
+            for batch in batches {
+                samples.extend_from_slice(decoder.decode_batch(&batch).unwrap());
+            }
+            samples
+        }
+
+        // Constant +1 doubles 1 Hz. The varying control alternates two
+        // doubled and two halved increments, including a mid-batch wrap.
+        assert_eq!(samples(3, 0, 0.0, 5).await, [-1.0, -0.5, 0.0, 0.5, -1.0]);
+        let varying = [-1.0, -0.5, 0.0, 0.125, 0.25, 0.75, -0.75, -0.625, -0.5];
+        assert_eq!(samples(3, 0, 2.0, varying.len()).await, varying);
+        assert_eq!(samples(7, 0, 2.0, varying.len()).await, varying);
+        assert_eq!(samples(3, 3, 2.0, 2).await, [-0.25, -0.125]);
+    }
+
+    #[tokio::test]
+    async fn malformed_frequency_control_is_rejected() {
+        let config = test_config();
+        let schema = frame_schema(&config);
+        let context = Arc::new(TaskContext::default());
+        for (frames, controls, reason) in [
+            (vec![0, 2], vec![0.0, 0.0], "expected frame 1, got 2"),
+            (vec![0, 1], vec![0.0, 1.1], "out-of-range sample at frame 1"),
+        ] {
+            let batch = RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(UInt64Array::from(frames)),
+                    Arc::new(Float32Array::from(controls)),
+                ],
+            )
+            .unwrap();
+            let input = Arc::new(
+                TestMemoryExec::try_new(&[vec![batch]], Arc::clone(&schema), None).unwrap(),
+            );
+            let input = FramePlan::try_from_plan(&config, input).unwrap();
+            let oscillator = FrameSawToothOscExec::try_new_modulated(&config, 1.0, input).unwrap();
+            let error = oscillator
+                .execute(0, Arc::clone(&context))
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("sawtooth modulation") && error.contains(reason),
+                "{error}"
+            );
+        }
     }
 
     #[tokio::test]

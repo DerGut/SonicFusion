@@ -54,8 +54,15 @@
     "kind": "sawtooth",
     "label": "Sawtooth",
     "category": "source",
-    "signature": "sawtooth(freq)",
-    "inputs": [],
+    "signature": "sawtooth(freq, [fm])",
+    "inputs": [
+      {
+        "name": "frequency",
+        "label": "Frequency modulation",
+        "signal": "control",
+        "required": false
+      }
+    ],
     "variadic_input": null,
     "has_output": true,
     "params": [

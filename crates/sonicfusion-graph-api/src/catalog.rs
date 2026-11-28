@@ -73,8 +73,13 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             kind: "sawtooth".into(),
             label: "Sawtooth".into(),
             category: Category::Source,
-            signature: "sawtooth(freq)".into(),
-            inputs: Vec::new(),
+            signature: "sawtooth(freq, [fm])".into(),
+            inputs: vec![PortDescriptor {
+                name: "frequency".into(),
+                label: "Frequency modulation".into(),
+                signal: Signal::Control,
+                required: false,
+            }],
             variadic_input: None,
             has_output: true,
             params: vec![hz(
