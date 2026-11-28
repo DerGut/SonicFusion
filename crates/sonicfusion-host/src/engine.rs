@@ -4,8 +4,8 @@ use datafusion::execution::TaskContext;
 use futures::TryStreamExt;
 use sonicfusion::{ExecutionConfig, FrameDecoder, dsl::build_live_plan};
 use sonicfusion_graph_api::{
-    GraphIssue, GraphSpec, IssueCode, ModulationMapping, NodeId, NodeKind, SessionInfo, Severity,
-    has_errors, upstream_of, validate, validate_upstream,
+    GraphIssue, GraphSpec, IssueCode, ModulationMapping, NodeId, NodeKind, PortRef, ScopeWindow,
+    SessionInfo, Severity, has_errors, upstream_of, validate, validate_upstream,
 };
 
 use crate::lower::{Lowered, lower};
@@ -18,6 +18,9 @@ const MIN_WARMUP_FRAMES: u64 = 4_800;
 const MAX_WARMUP_SECONDS: u64 = 2;
 /// Upper bound on a single probe so a caller can't stall the host.
 const MAX_PROBE_FRAMES: usize = 1 << 16;
+const MAX_SCOPE_SECONDS: f64 = 4.0;
+const MAX_SCOPE_FRAMES: usize = 4 * 192_000;
+const SCOPE_COLUMNS: usize = 1_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
@@ -151,6 +154,94 @@ impl Engine {
                 "probe length must be between 1 and {MAX_PROBE_FRAMES} frames"
             )));
         }
+        let (lowered, config, warmup) = self.prepare_probe(graph, node, start_frame, earliest)?;
+        self.runtime()
+            .spawn(render_probe(lowered, config, warmup, frames))
+            .await
+            .map_err(|error| HostError::Engine(format!("probe task failed: {error}")))?
+    }
+
+    /// Recompute a slow scope without transporting a full-rate window across
+    /// IPC. Envelope output and gate are rendered from one shared origin.
+    pub async fn scope(
+        &self,
+        graph: &GraphSpec,
+        node: &NodeId,
+        start_frame: u64,
+        seconds: f64,
+    ) -> Result<ScopeWindow, HostError> {
+        if !seconds.is_finite() || seconds <= 0.0 || seconds > MAX_SCOPE_SECONDS {
+            return Err(HostError::Engine(format!(
+                "scope duration must be greater than 0 and at most {MAX_SCOPE_SECONDS} seconds"
+            )));
+        }
+        let (lowered, config, warmup) = self.prepare_probe(graph, node, start_frame, 0)?;
+        let rate = config.sample_rate_hz();
+        let frames = ((seconds * f64::from(rate)).round() as usize).clamp(1, MAX_SCOPE_FRAMES);
+        let envelope = graph
+            .node(node)
+            .is_some_and(|node| matches!(node.kind, NodeKind::Envelope { .. }));
+        let gate = if envelope {
+            sonicfusion_graph_api::input_map(graph)
+                .get(&PortRef {
+                    node: node.clone(),
+                    port: "gate".into(),
+                })
+                .map(|gate| lower(graph, gate))
+                .transpose()
+                .map_err(HostError::Invalid)?
+        } else {
+            None
+        };
+        let bucket_frames = if envelope {
+            (rate as usize).div_ceil(100)
+        } else {
+            frames.div_ceil(SCOPE_COLUMNS)
+        };
+        self.runtime()
+            .spawn(async move {
+                let samples = render_probe(lowered, config, warmup, frames).await?;
+                let bands = samples
+                    .chunks(bucket_frames)
+                    .map(|bucket| {
+                        bucket
+                            .iter()
+                            .fold([1.0_f32, -1.0_f32], |[min, max], sample| {
+                                [min.min(*sample), max.max(*sample)]
+                            })
+                    })
+                    .collect();
+                let gate = if let Some(gate) = gate {
+                    let samples = render_probe(gate, config, warmup, samples.len()).await?;
+                    Some(
+                        samples
+                            .chunks(bucket_frames)
+                            .map(|bucket| bucket[bucket.len() / 2] > 0.0)
+                            .collect(),
+                    )
+                } else {
+                    None
+                };
+                Ok(ScopeWindow {
+                    start_frame,
+                    sample_rate_hz: rate,
+                    frames: samples.len(),
+                    bucket_frames,
+                    bands,
+                    gate,
+                })
+            })
+            .await
+            .map_err(|error| HostError::Engine(format!("scope task failed: {error}")))?
+    }
+
+    fn prepare_probe(
+        &self,
+        graph: &GraphSpec,
+        node: &NodeId,
+        start_frame: u64,
+        earliest: u64,
+    ) -> Result<(Lowered, ExecutionConfig, usize), HostError> {
         let issues = validate_upstream(graph, &self.info(), node);
         if has_errors(&issues) {
             return Err(HostError::Invalid(errors_only(issues)));
@@ -158,37 +249,10 @@ impl Engine {
         let lowered = lower(graph, node).map_err(HostError::Invalid)?;
         let warmup = self
             .warmup_frames(graph, node)
-            .min(start_frame.saturating_sub(earliest));
+            .min(start_frame.saturating_sub(earliest))
+            .min(MAX_SCOPE_FRAMES as u64);
         let config = self.inner.config.at_frame(start_frame - warmup);
-        let wanted = usize::try_from(warmup).expect("warm-up fits usize") + frames;
-        self.runtime()
-            .spawn(async move {
-                let plan = build_live_plan(&lowered.source, &config)
-                    .map_err(|error| HostError::Engine(error.to_string()))?;
-                let mut stream = plan
-                    .execute(0, Arc::new(TaskContext::default()))
-                    .map_err(|error| HostError::Engine(error.to_string()))?;
-                let mut decoder = FrameDecoder::continuous(&config);
-                let mut samples = Vec::with_capacity(wanted);
-                while samples.len() < wanted {
-                    let Some(batch) = stream
-                        .try_next()
-                        .await
-                        .map_err(|error| HostError::Engine(error.to_string()))?
-                    else {
-                        break;
-                    };
-                    let chunk = decoder
-                        .decode_chunk(&batch)
-                        .map_err(|error| HostError::Engine(error.to_string()))?;
-                    samples.extend_from_slice(chunk.samples());
-                }
-                samples.drain(..samples.len().min(wanted - frames));
-                samples.truncate(frames);
-                Ok(samples)
-            })
-            .await
-            .map_err(|error| HostError::Engine(format!("probe task failed: {error}")))?
+        Ok((lowered, config, warmup as usize))
     }
 
     /// Allow the slowest upstream filter or envelope to settle before the probe,
@@ -258,6 +322,40 @@ impl Engine {
             .expect("runtime lives until drop")
             .handle()
     }
+}
+
+async fn render_probe(
+    lowered: Lowered,
+    config: ExecutionConfig,
+    warmup: usize,
+    frames: usize,
+) -> Result<Vec<f32>, HostError> {
+    let plan = build_live_plan(&lowered.source, &config)
+        .map_err(|error| HostError::Engine(error.to_string()))?;
+    let mut stream = plan
+        .execute(0, Arc::new(TaskContext::default()))
+        .map_err(|error| HostError::Engine(error.to_string()))?;
+    let mut decoder = FrameDecoder::continuous(&config);
+    let mut samples = Vec::with_capacity(frames);
+    let mut skip = warmup;
+    while samples.len() < frames {
+        let Some(batch) = stream
+            .try_next()
+            .await
+            .map_err(|error| HostError::Engine(error.to_string()))?
+        else {
+            break;
+        };
+        let chunk = decoder
+            .decode_chunk(&batch)
+            .map_err(|error| HostError::Engine(error.to_string()))?;
+        let skipped = skip.min(chunk.samples().len());
+        skip -= skipped;
+        let available = chunk.samples().len() - skipped;
+        let keep = available.min(frames - samples.len());
+        samples.extend_from_slice(&chunk.samples()[skipped..skipped + keep]);
+    }
+    Ok(samples)
 }
 
 fn errors_only(issues: Vec<GraphIssue>) -> Vec<GraphIssue> {
@@ -422,6 +520,42 @@ mod tests {
                 .iter()
                 .any(|issue| issue.param.as_deref() == Some("sustain_level"))
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn slow_envelope_scope_aligns_gate_and_output_at_a_nonzero_origin() {
+        let engine = Engine::new().unwrap();
+        let graph: GraphSpec = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {"id": "audio", "kind": "square", "params": {"frequency_hz": 0.0, "pulse_width": 1.0}},
+                {"id": "gate", "kind": "square", "params": {"frequency_hz": 2.0, "pulse_width": 0.5}},
+                {"id": "env", "kind": "envelope", "params": {
+                    "attack_seconds": 0.0, "decay_seconds": 0.0,
+                    "sustain_level": 0.7, "release_seconds": 0.0
+                }}
+            ],
+            "wires": [
+                {"from": "audio", "to": {"node": "env", "port": "in"}},
+                {"from": "gate", "to": {"node": "env", "port": "gate"}}
+            ]
+        }))
+        .unwrap();
+        let node = NodeId::new("env");
+        let scope = engine.scope(&graph, &node, 4_800, 1.0).await.unwrap();
+        assert_eq!(
+            (scope.start_frame, scope.frames, scope.bucket_frames),
+            (4_800, 48_000, 480)
+        );
+        let gate = scope.gate.unwrap();
+        assert_eq!(gate.len(), 100);
+        assert_eq!(&gate[0..15], &[true; 15]);
+        assert_eq!(&gate[15..40], &[false; 25]);
+        assert_eq!(&gate[40..65], &[true; 25]);
+        for (band, open) in scope.bands.iter().zip(gate) {
+            assert_eq!(*band, if open { [0.7; 2] } else { [0.0; 2] });
+        }
+        assert!(engine.scope(&graph, &node, 0, 4.1).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]

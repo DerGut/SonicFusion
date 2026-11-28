@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import catalogJson from "../../../crates/sonicfusion-graph-api/fixtures/catalog.json";
 import studioPatch from "../../../crates/sonicfusion-graph-api/fixtures/studio-patch.json";
 import { MockEngine } from "../api/mock";
+import { slowScopeSeconds } from "./scope";
 import type { GraphSpec, NodeDescriptor } from "../api/types";
 import { addNode, catalogMap, connect, inputPorts, parseDocument, setParam, studioDocument, toGraph } from "./document";
 
@@ -39,6 +40,17 @@ it("persists envelope settings and wires, and shapes a square-gated audio signal
   const graph = toGraph(reopened);
   const { samples } = await engine.probe(graph, "out", 8);
   expect(samples).toEqual([0.25, 0.25, 0, 0, 0.25, 0.25, 0, 0]);
+  const scope = await engine.scope(graph, envelope, 1);
+  expect([scope.frames, scope.bucket_frames, scope.bands.length]).toEqual([48_000, 480, 100]);
+  const clocked = toGraph(setParam(reopened, gate, "frequency_hz", 2));
+  const envNode = clocked.nodes.find((node) => node.id === envelope)!;
+  const gateNode = clocked.nodes.find((node) => node.id === gate)!;
+  expect(slowScopeSeconds(clocked, envNode)).toBe(1);
+  expect(slowScopeSeconds(clocked, gateNode)).toBe(1);
+  const gated = await engine.scope(clocked, envelope, 1);
+  expect(gated.gate?.slice(0, 25)).toEqual(Array(25).fill(true));
+  expect(gated.gate?.slice(25, 50)).toEqual(Array(25).fill(false));
+  expect(gated.bands[49]).toEqual([0, 0]);
   const invalid = await engine.validate(toGraph(setParam(reopened, envelope, "sustain_level", 1.1)));
   expect(invalid).toContainEqual(expect.objectContaining({ code: "invalid_parameter", node: envelope, param: "sustain_level" }));
 
@@ -51,4 +63,22 @@ it("persists envelope settings and wires, and shapes a square-gated audio signal
     kind: "invalid",
     issues: [expect.objectContaining({ code: "invalid_parameter", node: envelope, param: "attack_seconds" })],
   });
+});
+
+it("bounds scope duration for slow oscillators and falls back for complex gates", () => {
+  const clock = { id: "clock", kind: "square", params: { frequency_hz: 0.1, pulse_width: 0.5 } } as const;
+  const env = { id: "env", kind: "envelope", params: {} } as const;
+  const graph: GraphSpec = {
+    version: 1,
+    nodes: [clock, env],
+    wires: [{ from: clock.id, to: { node: env.id, port: "gate" } }],
+  };
+  expect(slowScopeSeconds(graph, clock)).toBe(4);
+  expect(slowScopeSeconds(graph, env)).toBe(4);
+  const fast = { ...clock, params: { ...clock.params, frequency_hz: 12 } };
+  expect(slowScopeSeconds(graph, fast)).toBe(0.25);
+  expect(slowScopeSeconds(graph, { ...fast, params: { ...fast.params, frequency_hz: 20 } })).toBeNull();
+  const dc = { ...clock, params: { ...clock.params, pulse_width: 1 } };
+  expect(slowScopeSeconds({ ...graph, nodes: [dc, env] }, env)).toBe(1);
+  expect(slowScopeSeconds({ ...graph, nodes: [{ id: clock.id, kind: "mix", params: { weights: [1] } }, env] }, env)).toBe(1);
 });

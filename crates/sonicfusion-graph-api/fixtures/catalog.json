@@ -191,19 +191,19 @@
         "name": "attack_seconds",
         "label": "Attack",
         "unit": "s",
-        "min": 0.0,
-        "max": 2.0,
-        "default": 0.02,
-        "scale": "linear"
+        "min": 0.001,
+        "max": 10.0,
+        "default": 0.01,
+        "scale": "log"
       },
       {
         "name": "decay_seconds",
         "label": "Decay",
         "unit": "s",
-        "min": 0.0,
-        "max": 2.0,
-        "default": 0.1,
-        "scale": "linear"
+        "min": 0.001,
+        "max": 10.0,
+        "default": 0.2,
+        "scale": "log"
       },
       {
         "name": "sustain_level",
@@ -211,17 +211,17 @@
         "unit": null,
         "min": 0.0,
         "max": 1.0,
-        "default": 0.6,
+        "default": 0.7,
         "scale": "linear"
       },
       {
         "name": "release_seconds",
         "label": "Release",
         "unit": "s",
-        "min": 0.0,
-        "max": 2.0,
-        "default": 0.15,
-        "scale": "linear"
+        "min": 0.001,
+        "max": 10.0,
+        "default": 0.3,
+        "scale": "log"
       }
     ]
   },

@@ -49,8 +49,11 @@ impl Adsr {
 
 /// Multiplies audio by a gate-driven ADSR, initially closed at the execution origin.
 /// The gate is open for positive samples. An opening or closing edge starts a
-/// ramp from the current level. A nonzero stage takes ceil(seconds * sample_rate)
-/// frames, advancing on its first frame. Zero-length stages consume no frames.
+/// ramp from the current level. Attack increments at the rate that would take
+/// `attack_seconds` from zero, so retriggering above zero reaches the peak
+/// sooner. Decay and release take their configured durations regardless of
+/// starting level. Every ramp advances on its first frame. Zero-length stages
+/// consume no frames.
 /// Gate samples must cover the execution origin through the final audio frame,
 /// including any audio gaps. Only the audio input determines output rows.
 #[derive(Debug)]
@@ -243,7 +246,7 @@ impl EnvelopeState {
     fn new(adsr: Adsr, rate: u32) -> Self {
         let frames = |seconds: f64| (seconds * f64::from(rate)).ceil();
         Self {
-            attack: frames(adsr.attack_seconds),
+            attack: adsr.attack_seconds * f64::from(rate),
             decay: frames(adsr.decay_seconds),
             sustain: adsr.sustain_level,
             release: frames(adsr.release_seconds),
@@ -263,7 +266,15 @@ impl EnvelopeState {
         loop {
             let (target, frames, next) = match self.stage {
                 Stage::Idle | Stage::Sustain => return,
-                Stage::Attack => (1.0, self.attack, Stage::Decay),
+                Stage::Attack => {
+                    let distance = 1.0 - self.start;
+                    let frames = if distance == 0.0 {
+                        0.0
+                    } else {
+                        self.attack * distance
+                    };
+                    (1.0, frames, Stage::Decay)
+                }
                 Stage::Decay => (self.sustain, self.decay, Stage::Sustain),
                 Stage::Release => (0.0, self.release, Stage::Idle),
             };

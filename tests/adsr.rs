@@ -71,9 +71,11 @@ async fn retriggers_from_the_release_level_and_consumes_gates_during_audio_gaps(
     );
 
     // Frame 13 has no audio, but its falling gate starts release at 0.5
-    // and leaves 0.375 for the next attack. Frame 24 has no audio either.
+    // and leaves 0.375 for the next attack. Each attack sample adds 0.25,
+    // so the retrigger reaches the peak in three frames instead of four.
+    // Frame 24 has no audio either.
     let expected_levels = [
-        0.0, 0.25, 0.5, 0.53125, 0.6875, 0.84375, 1.0, 0.75, 0.5, 0.375, 0.25, 0.125, 0.0,
+        0.0, 0.25, 0.5, 0.625, 0.875, 1.0, 0.75, 0.5, 0.5, 0.375, 0.25, 0.125, 0.0,
     ];
     for _ in 0..2 {
         let batches = collect(plan.clone(), Arc::new(TaskContext::default()))

@@ -45,21 +45,24 @@ audio by a linear ADSR envelope. The audio can also be piped into the envelope:
 
 ```text
 square(2, 0.5) -> $gate;
-sine(220) -> envelope($gate, 0.02, 0.1, 0.6, 0.15) -> gain(0.08) -> out
+sine(220) -> envelope($gate, 0.01, 0.2, 0.7, 0.3) -> gain(0.08) -> out
 ```
 
 Attack, decay, and release are finite, nonnegative seconds. Sustain is a level
 between 0 and 1. The gate opens for positive samples and closes at zero or
-below. The first open sample starts attack toward 1 from the current level.
-While held, the envelope decays to sustain. A closing edge starts release from
-the current level toward zero. A new opening edge during release starts a new
-attack from the current level. Each nonzero ramp starts moving on its first
-frame and reaches its target after the stage duration rounded up to a whole
-number of frames. Zero-duration stages take no frames. The envelope starts
-closed at the execution origin, including after a live graph replacement.
+below. An opening edge starts attack from the current level. Attack sets a
+rate: from zero it takes A seconds to reach 1, and from 0.8 it takes 0.2 × A.
+A held gate decays to sustain over D seconds. A closing edge releases from
+the current level over R seconds. Every ramp advances on its first frame.
+Zero-duration stages take no frames. Each execution starts with the gate
+closed, including after a live graph replacement.
 
-In the editor, connect the audio to **in** and a slow square oscillator to
-**Gate**. The node has one shaped audio output.
+In the editor, connect audio to **in** and a slow square oscillator to
+**Gate**. The duration sliders cover 1 ms to 10 s logarithmically. Typed
+values and DSL still accept any finite nonnegative duration, including zero.
+The slow scope shows two periods for a directly connected fixed-rate
+oscillator, within 250 ms to 4 s, and uses a 1 s window for other gates.
+The scope approximates live history with a bounded warm-up.
 
 ## Direct playback
 

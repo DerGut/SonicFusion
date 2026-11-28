@@ -1,7 +1,7 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { memo } from "react";
 
-import type { PortDescriptor } from "../api/types";
+import type { NodeSpec, PortDescriptor } from "../api/types";
 import { wireId } from "../model/document";
 import { formatHz } from "../model/signal";
 import { IO_PORT_TOP, type SfNode, pickUpWire, rowPortTop } from "./flow";
@@ -73,14 +73,28 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     const source = sources[gate.name];
     handles.push(inputHandle(gate, rowPortTop(rows.length)));
     rows.push(
-      <div key={gate.name} className="param modulated">
-        <div className="param-top"><span>{gate.label}</span><span>Opens above 0</span></div>
-        {source && <p className="param-note" title={source.label}>from {source.label}</p>}
+      <div key={gate.name} className="param modulated envelope-gate">
+        <div className="param-top">
+          <span>{gate.label}</span>
+          <EnvelopeThumbnail params={node.params} />
+          <span title="The gate opens above zero and closes at zero or below">opens &gt; 0</span>
+        </div>
+        <p className="param-note" title={source?.label}>
+          {source ? `from ${source.label}` : "Not connected · output stays silent"}
+        </p>
+      </div>,
+      <div key="adsr" className="envelope-params">
+        {descriptor.params.map((param) => (
+          <ParamControl key={param.name} id={`${node.id}-${param.name}`} descriptor={param}
+            value={Number(node.params[param.name])} invalid={paramIssue(param.name)}
+            onBeginContinuous={actions.beginContinuous}
+            onChange={(value, continuous) => actions.setParam(node.id, param.name, value, continuous)} />
+        ))}
       </div>,
     );
   }
 
-  descriptor.params.forEach((param) => {
+  if (!gate) descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
     const isCutoff = param.frequency === "cutoff";
@@ -150,6 +164,26 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
           title={data.outgoing.length > 0 ? "Output: drag to add a wire, ⌥-drag to hand one to another output" : "Output: drag to connect"} />
       )}
     </div>
+  );
+}
+
+/** Relative log widths keep short stages visible in the thumbnail. */
+function EnvelopeThumbnail({ params }: { params: NodeSpec["params"] }) {
+  const width = (name: string) => {
+    const seconds = Number(params[name]);
+    return 1 + Math.log10(1 + 1_000 * (Number.isFinite(seconds) ? Math.min(10, Math.max(seconds, 0)) : 0));
+  };
+  const attack = width("attack_seconds");
+  const decay = width("decay_seconds");
+  const release = width("release_seconds");
+  const held = 2;
+  const dx = 54 / (attack + decay + held + release);
+  const sustain = Number(params.sustain_level);
+  const y = 15 - 14 * (Number.isFinite(sustain) ? Math.min(1, Math.max(sustain, 0)) : 0);
+  return (
+    <svg className="envelope-thumbnail" width="56" height="16" viewBox="0 0 56 16" aria-hidden="true">
+      <path d={`M1 15 L${1 + attack * dx} 1 L${1 + (attack + decay) * dx} ${y} L${55 - release * dx} ${y} L55 15`} />
+    </svg>
   );
 }
 

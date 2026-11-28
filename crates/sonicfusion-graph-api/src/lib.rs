@@ -22,7 +22,8 @@ pub use spec::{
     GRAPH_VERSION, GraphSpec, InputPort, NodeId, NodeKind, NodeSpec, PortRef, Signal, Wire,
 };
 pub use status::{
-    LevelReading, ModulationMapping, ProbeWindow, RevisionStatus, RevisionUpdate, SessionInfo,
+    LevelReading, ModulationMapping, ProbeWindow, RevisionStatus, RevisionUpdate, ScopeWindow,
+    SessionInfo,
 };
 pub use validate::{
     GraphIssue, IssueCode, MAX_DEPTH, MAX_EXECUTIONS, Severity, has_errors, input_map, upstream_of,

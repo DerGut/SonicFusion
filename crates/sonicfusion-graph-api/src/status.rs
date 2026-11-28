@@ -77,6 +77,19 @@ pub struct ProbeWindow {
     pub samples: Vec<f32>,
 }
 
+/// Bounded slow-scope preview. Each band is the minimum and maximum of a
+/// consecutive group of `bucket_frames` samples. The final group can be
+/// shorter. Gate states are sampled at the midpoint of the same groups.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScopeWindow {
+    pub start_frame: u64,
+    pub sample_rate_hz: u32,
+    pub frames: usize,
+    pub bucket_frames: usize,
+    pub bands: Vec<[f32; 2]>,
+    pub gate: Option<Vec<bool>>,
+}
+
 /// Peak level of the active circuit's output over a window starting at the
 /// session's next output frame (admitted, not necessarily audible yet).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -9,7 +9,7 @@ use std::sync::{
 use serde::Serialize;
 use sonicfusion_graph_api::{
     GraphIssue, GraphSpec, LevelReading, NodeDescriptor, NodeId, ProbeWindow, RevisionStatus,
-    SessionInfo, catalog as node_catalog,
+    ScopeWindow, SessionInfo, catalog as node_catalog,
 };
 use sonicfusion_host::{Engine, HostError, Session, SessionExit, default_output_rate};
 use tauri::{AppHandle, Builder, Emitter, Runtime, State};
@@ -212,6 +212,23 @@ async fn probe(
     })
 }
 
+/// Recompute a slow scope at the same timeline origin as the short probe.
+#[tauri::command]
+async fn scope(
+    state: State<'_, AppState>,
+    graph: GraphSpec,
+    node: String,
+    seconds: f64,
+) -> CommandResult<ScopeWindow> {
+    let start_frame = current(&state)
+        .await
+        .map_or(0, |running| running.session.next_output_frame());
+    Ok(state
+        .engine()
+        .scope(&graph, &NodeId::new(node), start_frame, seconds)
+        .await?)
+}
+
 /// Peak of what is playing, or nothing without a running session.
 #[tauri::command]
 async fn level(state: State<'_, AppState>, frames: usize) -> CommandResult<Option<LevelReading>> {
@@ -264,6 +281,7 @@ fn with_engine<R: Runtime>(builder: Builder<R>, engine: Engine) -> Builder<R> {
             apply_graph,
             probe,
             level,
+            scope,
         ])
 }
 
@@ -342,6 +360,15 @@ mod tests {
         .unwrap();
         assert_eq!(probe["start_frame"], 0);
         assert_eq!(probe["samples"].as_array().unwrap().len(), 64);
+        let scope = call(
+            &webview,
+            "scope",
+            json!({"graph": fixture(), "node": "osc_a", "seconds": 4}),
+        )
+        .unwrap();
+        assert_eq!(scope["frames"], 192_000);
+        assert_eq!(scope["bands"].as_array().unwrap().len(), 1_000);
+        assert_eq!(scope["gate"], Value::Null);
         assert_eq!(
             call(&webview, "level", json!({"frames": 64})).unwrap(),
             Value::Null

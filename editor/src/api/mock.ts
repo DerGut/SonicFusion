@@ -1,5 +1,6 @@
 import catalogJson from "../../../crates/sonicfusion-graph-api/fixtures/catalog.json";
 
+import { envelopeGate } from "../model/scope";
 import type { EngineClient } from "./client";
 import type {
   CommandError,
@@ -11,6 +12,7 @@ import type {
   ProbeWindow,
   RevisionEvent,
   RevisionUpdate,
+  ScopeWindow,
   SessionInfo,
 } from "./types";
 
@@ -105,6 +107,37 @@ export class MockEngine implements EngineClient {
       sample_rate_hz: INFO.sample_rate_hz,
       samples: render(graph, node, start, frames),
     };
+  }
+
+  async scope(graph: GraphSpec, node: string, seconds: number): Promise<ScopeWindow> {
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 4) {
+      throw error("engine", "scope duration must be greater than 0 and at most 4 seconds");
+    }
+    const issues = upstreamIssues(graph, node);
+    if (issues.length > 0) throw error("invalid", `the graph has ${issues.length} error(s)`, issues);
+    const start = this.playing ? this.frame() : 0;
+    const rate = INFO.sample_rate_hz;
+    const frames = Math.max(1, Math.round(seconds * rate));
+    const envelope = graph.nodes.find((candidate) => candidate.id === node)?.kind === "envelope";
+    const gateId = envelope ? envelopeGate(graph, node) : undefined;
+    const warmup = envelope ? Math.min(start, 2 * rate) : 0;
+    const samples = render(graph, node, start - warmup, warmup + frames).slice(warmup);
+    const gateSamples = gateId ? render(graph, gateId, start - warmup, warmup + frames).slice(warmup) : null;
+    const bucket = envelope ? Math.ceil(rate / 100) : Math.ceil(frames / 1000);
+    const bands: ScopeWindow["bands"] = [];
+    const gate: ScopeWindow["gate"] = gateSamples ? [] : null;
+    for (let begin = 0; begin < frames; begin += bucket) {
+      const end = Math.min(begin + bucket, frames);
+      let min = 1;
+      let max = -1;
+      for (let n = begin; n < end; n++) {
+        min = Math.min(min, samples[n]);
+        max = Math.max(max, samples[n]);
+      }
+      bands.push([min, max]);
+      if (gate && gateSamples) gate.push(gateSamples[Math.floor((begin + end) / 2)] > 0);
+    }
+    return { start_frame: start, sample_rate_hz: rate, frames, bucket_frames: bucket, bands, gate };
   }
 
   async level(frames: number): Promise<LevelReading | null> {
@@ -311,7 +344,7 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
 function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSpec["params"]): Float32Array {
   type Stage = "attack" | "decay" | "sustain" | "release" | "idle";
   const frames = (name: string) => Math.ceil(Number(params[name]) * INFO.sample_rate_hz);
-  const attack = frames("attack_seconds");
+  const attack = Number(params.attack_seconds) * INFO.sample_rate_hz;
   const decay = frames("decay_seconds");
   const sustain = Number(params.sustain_level);
   const release = frames("release_seconds");
@@ -333,7 +366,8 @@ function envelopeSamples(audio: Float32Array, gate: Float32Array, params: NodeSp
       enter(open ? "attack" : "release");
     }
     while (stage !== "idle" && stage !== "sustain") {
-      const duration = stage === "attack" ? attack : stage === "decay" ? decay : release;
+      const attackDuration = initial === 1 ? 0 : attack * (1 - initial);
+      const duration = stage === "attack" ? attackDuration : stage === "decay" ? decay : release;
       const target = stage === "attack" ? 1 : stage === "decay" ? sustain : 0;
       const next = stage === "attack" ? "decay" : stage === "decay" ? "sustain" : "idle";
       if (duration === 0) {

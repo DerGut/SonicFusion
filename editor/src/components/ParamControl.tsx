@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { ParamDescriptor } from "../api/types";
-import { formatHz } from "../model/signal";
+import { formatHz, formatSeconds } from "../model/signal";
 import { ParameterRange } from "./ParameterRange";
 
 export const SLIDER_STEPS = 1000;
@@ -21,7 +21,7 @@ export function fromSlider(descriptor: ParamDescriptor, position: number): numbe
 }
 
 export function formatValue(descriptor: ParamDescriptor, value: number): string {
-  if (descriptor.unit === "s") return `${Number(value.toPrecision(4))} s`;
+  if (descriptor.unit === "s") return formatSeconds(value);
   if (descriptor.unit === "Hz") return formatHz(value);
   return value.toFixed(2);
 }
@@ -42,8 +42,11 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
   const [typing, setTyping] = useState<string | null>(null);
   const position = toSlider(descriptor, value);
   const commit = () => {
-    const parsed = Number(typing);
-    if (typing !== null && typing.trim() !== "" && Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
+    if (typing?.trim()) {
+      const suffix = descriptor.unit === "s" ? typing.match(/^(.+?)\s*(ms|s)\s*$/i) : null;
+      const parsed = suffix ? Number(suffix[1]) / (suffix[2].toLowerCase() === "ms" ? 1_000 : 1) : Number(typing);
+      if (Number.isFinite(parsed) && parsed !== value) onChange(parsed, false);
+    }
     setTyping(null);
   };
   return (
@@ -53,7 +56,7 @@ export function ParamControl({ id, descriptor, label, value, invalid, onChange, 
         {typing === null ? (
           <button type="button" className="value nodrag" title="Click to type a value"
             aria-label={`${label ?? descriptor.label}: ${formatValue(descriptor, value)}. Type a value`}
-            onClick={() => setTyping(String(value))}>
+            onClick={() => setTyping(descriptor.unit === "s" ? `${value} s` : String(value))}>
             {formatValue(descriptor, value)}
           </button>
         ) : (

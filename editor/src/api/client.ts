@@ -5,6 +5,7 @@ import type {
   NodeDescriptor,
   ProbeWindow,
   RevisionEvent,
+  ScopeWindow,
   SessionEnded,
   SessionInfo,
   Started,
@@ -30,6 +31,8 @@ export interface EngineClient {
   applyGraph(graph: GraphSpec): Promise<number>;
   /** Recomputed output of `node` at the session's current frame. */
   probe(graph: GraphSpec, node: string, frames: number): Promise<ProbeWindow>;
+  /** Decimated long-window Scope display with an optional envelope gate overlay. */
+  scope(graph: GraphSpec, node: string, seconds: number): Promise<ScopeWindow>;
   /** Peak of what is playing, or null without a session. */
   level(frames: number): Promise<LevelReading | null>;
   onRevision(listener: (event: RevisionEvent) => void): () => void;

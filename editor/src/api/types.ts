@@ -127,6 +127,17 @@ export interface ProbeWindow {
   samples: number[];
 }
 
+export interface ScopeWindow {
+  start_frame: number;
+  sample_rate_hz: number;
+  frames: number;
+  bucket_frames: number;
+  /** Minimum and maximum of each consecutive bin. */
+  bands: [number, number][];
+  /** Gate state at each envelope bin's midpoint. */
+  gate: boolean[] | null;
+}
+
 export interface LevelReading {
   frame: number;
   frames: number;

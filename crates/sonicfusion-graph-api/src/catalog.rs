@@ -31,10 +31,10 @@ pub fn catalog() -> Vec<NodeDescriptor> {
         name: name.into(),
         label: label.into(),
         unit: Some("s".into()),
-        min: 0.0,
-        max: 2.0,
+        min: 0.001,
+        max: 10.0,
         default,
-        scale: Scale::Linear,
+        scale: Scale::Log,
         frequency: None,
     };
     let audio_in = |name: &str, label: &str| PortDescriptor {
@@ -171,10 +171,10 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             variadic_input: None,
             has_output: true,
             params: vec![
-                seconds("attack_seconds", "Attack", 0.02),
-                seconds("decay_seconds", "Decay", 0.1),
-                ratio("sustain_level", "Sustain", 0.6),
-                seconds("release_seconds", "Release", 0.15),
+                seconds("attack_seconds", "Attack", 0.01),
+                seconds("decay_seconds", "Decay", 0.2),
+                ratio("sustain_level", "Sustain", 0.7),
+                seconds("release_seconds", "Release", 0.3),
             ],
         },
         NodeDescriptor {
