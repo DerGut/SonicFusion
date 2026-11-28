@@ -21,6 +21,7 @@ import {
   wouldCycle,
 } from "../model/document";
 import type { Wire } from "../api/types";
+import { constantDestinations } from "../model/constant";
 import type { NodeActions, SfEdge, SfNode, SfNodeData } from "./flow";
 import { NodeView } from "./NodeView";
 import { ConnectionLine, WireEdge } from "./WireEdge";
@@ -99,6 +100,7 @@ export function Canvas(props: Props) {
           ports: portsByNode.get(node.id) ?? [],
           sources: sourcesByNode.get(node.id) ?? {},
           outgoing: outgoingByNode.get(node.id) ?? [],
+          constantDestinations: node.kind === "constant" ? constantDestinations(doc, node.id, session) : [],
           frequencyRole: controlSources.get(node.id) ?? "audio",
           issues: issues.filter((issue) => issue.node === node.id),
           session,
@@ -301,6 +303,7 @@ function sameNodeData(a: SfNodeData, b: SfNodeData): boolean {
     JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
     JSON.stringify(a.sources) === JSON.stringify(b.sources) &&
     JSON.stringify(a.outgoing) === JSON.stringify(b.outgoing) &&
+    JSON.stringify(a.constantDestinations) === JSON.stringify(b.constantDestinations) &&
     JSON.stringify(a.issues) === JSON.stringify(b.issues)
   );
 }

@@ -63,6 +63,12 @@ starts from the base frequency's phase at the execution's first frame. An
 offline probe starting later approximates the live phase because it has only
 a bounded window of control history.
 
+`constant(value)` emits a DC control signal in [-1, 1] on every frame.
+For example, `constant(1) -> $dc; sine(220, $dc) -> gain(0.1) -> out`
+plays a steady 440 Hz tone using the oscillator's frequency mapping. The editor's
+Constant slider shows the mapped frequency and range for each connected FM or
+cutoff input. One source can feed destinations with different mappings.
+
 The Noise node and `noise()` generate mono white noise in [-1, 1]. Output is
 deterministic per source and absolute frame, independent of render batch size.
 An optional unsigned 32-bit seed, `noise(seed)`, fixes a particular sequence.

@@ -1,5 +1,25 @@
 [
   {
+    "kind": "constant",
+    "label": "Constant",
+    "category": "source",
+    "signature": "constant(value)",
+    "inputs": [],
+    "variadic_input": null,
+    "has_output": true,
+    "params": [
+      {
+        "name": "value",
+        "label": "Value",
+        "unit": null,
+        "min": -1.0,
+        "max": 1.0,
+        "default": 0.0,
+        "scale": "linear"
+      }
+    ]
+  },
+  {
     "kind": "sine",
     "label": "Sine",
     "category": "source",

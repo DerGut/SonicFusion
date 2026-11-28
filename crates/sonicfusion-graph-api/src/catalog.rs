@@ -45,6 +45,19 @@ pub fn catalog() -> Vec<NodeDescriptor> {
     };
     vec![
         NodeDescriptor {
+            kind: "constant".into(),
+            label: "Constant".into(),
+            category: Category::Source,
+            signature: "constant(value)".into(),
+            inputs: Vec::new(),
+            variadic_input: None,
+            has_output: true,
+            params: vec![ParamDescriptor {
+                min: -1.0,
+                ..ratio("value", "Value", 0.0)
+            }],
+        },
+        NodeDescriptor {
             kind: "sine".into(),
             label: "Sine".into(),
             category: Category::Source,
@@ -216,6 +229,9 @@ pub fn default_kind(kind: &str) -> Option<NodeKind> {
             .map(|param| param.default)
     };
     Some(match kind {
+        "constant" => NodeKind::Constant {
+            value: param("value")?,
+        },
         "sine" => NodeKind::Sine {
             frequency_hz: param("frequency_hz")?,
         },

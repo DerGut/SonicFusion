@@ -11,6 +11,7 @@ import type {
   Signal,
 } from "../api/types";
 import type { DocNode } from "../model/document";
+import type { ConstantDestination } from "../model/constant";
 import type { FrequencyMode, FrequencyRole } from "../model/pitch";
 
 /** Fixed row metrics, so port handles line up with their rows. */
@@ -61,6 +62,7 @@ export interface SfNodeData extends Record<string, unknown> {
   sources: Record<string, { id: string; label: string }>;
   /** Ids of the wires leaving this node, oldest first. */
   outgoing: string[];
+  constantDestinations: ConstantDestination[];
   frequencyRole: FrequencyRole;
   issues: GraphIssue[];
   session: SessionInfo;

@@ -10,6 +10,7 @@ import { NodeTitle } from "./NodeTitle";
 import { OutputMeter } from "./OutputMeter";
 import { ParamControl } from "./ParamControl";
 import { FrequencyControl } from "./FrequencyControl";
+import { ConstantReadout } from "./ConstantReadout";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const { node, descriptor, ports, sources, issues, actions, session } = data;
@@ -148,6 +149,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
         <span>{descriptor.has_output ? "out" : node.kind === "output" ? "mono → device" : ""}</span>
       </div>
       {rows}
+      {node.kind === "constant" && <ConstantReadout destinations={data.constantDestinations} />}
       {descriptor.variadic_input && (
         <div className="sf-node-footer nodrag">
           <button type="button" onClick={() => actions.addMixInput(node.id)}>+ Input</button>

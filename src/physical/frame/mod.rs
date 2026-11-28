@@ -1,4 +1,5 @@
 mod aligned;
+mod constant;
 mod envelope;
 mod gain;
 mod low_pass_filter;
@@ -9,6 +10,8 @@ mod sine;
 mod square;
 mod white_noise;
 
+pub use constant::FrameConstantExec;
+pub(crate) use constant::validate_constant;
 pub use envelope::{Adsr, FrameEnvelopeExec};
 pub use gain::FrameGainExec;
 pub use low_pass_filter::{Cutoff, FrameLowPassFilterExec, low_pass, low_pass_with_mix};
