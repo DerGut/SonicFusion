@@ -142,7 +142,12 @@ pub fn catalog() -> Vec<NodeDescriptor> {
             inputs: vec![audio_in("in", "in")],
             variadic_input: None,
             has_output: true,
-            params: vec![ratio("factor", "Factor", 0.1)],
+            // Gain is a multiplier: below unity attenuates, above amplifies.
+            // This is an editing range; validation accepts any finite f32.
+            params: vec![ParamDescriptor {
+                max: 4.0,
+                ..ratio("factor", "Factor", 0.1)
+            }],
         },
         NodeDescriptor {
             kind: "mix".into(),
