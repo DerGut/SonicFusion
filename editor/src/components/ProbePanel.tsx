@@ -11,6 +11,7 @@ import { Icon } from "./icons";
 import { PanelRename, useDocNodes, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
 // PROTOTYPE #34/#39
 import { SlowScope, formatSeconds, gateSource, probeFrames } from "../prototype/envelope.prototype";
+import { PatternEditor } from "../prototype/sequencer.prototype";
 
 const PROBE_FRAMES = 2048;
 const LIVE_INTERVAL_MS = 200;
@@ -22,7 +23,7 @@ const SCOPE_SECONDS = 0.02;
  * output from the draft at the session's current frame; nothing is tapped
  * from the device stream.
  */
-export function ProbePanel({ client, graph, node, playing, draft, session, onClose, onRename, renameFocus = 0 }: {
+export function ProbePanel({ client, graph, node, playing, draft, session, onClose, onRename, renameFocus = 0, onSetParam }: {
   client: EngineClient;
   graph: GraphSpec;
   node: DocNode;
@@ -33,11 +34,15 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
   onClose: () => void;
   onRename: (id: string, name: string) => void;
   renameFocus?: number;
+  onSetParam?: (name: string, value: number[]) => void;
 }) {
+  const seqVariant = useVariant("seq");
+  const patternTab = seqVariant === "B" && node.kind === "sequencer";
   const label = useNodeLabel();
   const docNodes = useDocNodes();
   const nameVariant = useVariant("name");
-  const [view, setView] = useState<"scope" | "spectrum">("scope");
+  const [view, setView] = useState<"scope" | "spectrum" | "pattern">(
+    new URLSearchParams(window.location.search).get("seq") === "B" && node.kind === "sequencer" ? "pattern" : "scope");
   const [probe, setProbe] = useState<ProbeWindow | null>(null);
   const [gateProbe, setGateProbe] = useState<number[]>([]);
   const frames = probeFrames(graph, node, session.sample_rate_hz, PROBE_FRAMES);
@@ -93,10 +98,10 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
         <Icon name="probe" />
         {nameVariant === "C" ? <PanelRename node={node} focusToken={renameFocus} onRename={onRename} /> : <span className="probe-title">{label(node, node.id)} › out</span>}
         <div role="tablist" aria-label="Probe view" className="tabs">
-          {(["scope", "spectrum"] as const).map((tab) => (
+          {([...(patternTab ? ["pattern"] as const : []), "scope", "spectrum"] as const).map((tab) => (
             <button key={tab} type="button" role="tab" aria-selected={view === tab} aria-controls="probe-plot"
               className={view === tab ? "active" : ""} onClick={() => setView(tab)}>
-              {tab === "scope" ? "Scope" : "Spectrum"}
+              {tab === "scope" ? "Scope" : tab === "spectrum" ? "Spectrum" : "Pattern"}
             </button>
           ))}
         </div>
@@ -115,14 +120,16 @@ export function ProbePanel({ client, graph, node, playing, draft, session, onClo
         <div className="plot" id="probe-plot" role="tabpanel" aria-label={view === "scope" ? "Scope" : "Spectrum"}>
           {unavailable ? (
             <p className={`plot-message${unavailable.problem ? " error" : ""}`}>{unavailable.text}</p>
-          ) : view === "scope" ? (
+          ) : view === "pattern" && patternTab ? (
+            <PatternEditor node={node} onSteps={(next) => onSetParam?.("steps", next)} />
+          ) : view === "scope" || view === "pattern" ? (
             slow ? <SlowScope samples={samples} gate={gateProbe} rate={rate} outline={node.kind === "envelope"} /> : <Scope samples={samples} rate={rate} />
           ) : (
             <Spectrum spectrum={spectrum} rate={rate} cutoff={cutoff} />
           )}
           <span className="plot-label">
-            {view === "scope"
-              ? slow ? node.kind === "envelope" ? `${formatSeconds(frames / rate)} · gate dashed · peak per 10 ms` : `${formatSeconds(frames / rate)} · two cycles` : `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
+            {view === "pattern" && patternTab ? "one bar · 16 steps · four per beat" : view !== "spectrum"
+              ? slow ? node.kind === "sequencer" ? `${formatSeconds(frames / rate)} · one bar` : node.kind === "envelope" ? `${formatSeconds(frames / rate)} · gate dashed · peak per 10 ms` : `${formatSeconds(frames / rate)} · two cycles` : `${SCOPE_SECONDS * 1000} ms · triggered · auto-scaled`
               : "dBFS · 20 Hz – 20 kHz · log"}
           </span>
         </div>

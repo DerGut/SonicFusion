@@ -24,13 +24,18 @@ import { ParameterRange, fromSlider, toSlider } from "../components/ParamControl
 
 // ---------------------------------------------------------------- URL state
 
-type Key = "pitch" | "name" | "env";
+type Key = "pitch" | "name" | "env" | "seq";
 const VARIANTS: Record<Key, { id: string; label: string }[]> = {
   pitch: [
     { id: "A", label: "Current: per-param Hz/Note select" },
     { id: "B", label: "Patch-wide unit, dual readout" },
     { id: "C", label: "Both units, keyboard popover" },
     { id: "D", label: "Per-node unit, role default" },
+  ],
+  seq: [
+    { id: "A", label: "Wide node, inline grid" },
+    { id: "B", label: "Compact node, panel editor" },
+    { id: "C", label: "Euclidean ring" },
   ],
   env: [
     { id: "A", label: "Four slider rows" },
@@ -82,6 +87,7 @@ export function PrototypeSwitcher() {
   const pitch = useVariant("pitch");
   const name = useVariant("name");
   const env = useVariant("env");
+  const seq = useVariant("seq");
   if (!import.meta.env.DEV) return null;
   const group = (key: Key, current: string, issue: string) => {
     const list = VARIANTS[key];
@@ -101,6 +107,7 @@ export function PrototypeSwitcher() {
       {group("pitch", pitch, "#33 pitch")}
       {group("name", name, "#41 name")}
       {group("env", env, "#34 env")}
+      {group("seq", seq, "seq")}
     </div>
   );
 }

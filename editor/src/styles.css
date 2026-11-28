@@ -351,3 +351,40 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .proto-curve-values { font-size: 10px; white-space: nowrap; }
 .proto-curve-values span { display: flex; gap: 2px; }
 .proto-pair { gap: 8px; } .proto-compact .param-top { gap: 2px; white-space: nowrap; }
+
+/* PROTOTYPE sequencer — throwaway */
+.sf-node.proto-wide { width: 412px; }
+.proto-clock .param-top { align-items: center; }
+.proto-grid-row { padding: 2px 12px 6px 14px; display: flex; flex-direction: column; gap: 3px; }
+.proto-grid-beats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.proto-grid { display: grid; grid-template-columns: repeat(16, 1fr); column-gap: 3px; }
+.proto-grid .proto-step:nth-child(4n + 1):not(:first-child) { margin-left: 5px; }
+.proto-step { position: relative; height: 26px; padding: 0; border: 1px solid var(--edge); border-radius: 4px; background: #11151a; cursor: pointer; overflow: hidden; }
+.proto-step.downbeat { border-color: #3a4350; }
+.proto-step.on { background: #3b2a12; border-color: #f2a33a; }
+.proto-step-gate { position: absolute; left: 0; top: 0; bottom: 0; background: #f2a33a; }
+.proto-mini-row { gap: 9px; }
+.proto-mini { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; height: 10px; cursor: pointer; }
+.proto-mini span { border-radius: 1px; background: #262c35; }
+.proto-mini span.downbeat { background: #333b47; }
+.proto-mini span.on { background: #f2a33a; }
+.proto-link { color: var(--control-soft) !important; cursor: pointer !important; }
+.proto-pattern { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; box-sizing: border-box; }
+.proto-pattern-grid { flex: 1; display: grid; grid-template-columns: repeat(16, 1fr); column-gap: 6px; }
+.proto-pattern-grid .proto-cell:nth-child(4n + 1):not(:first-child) { margin-left: 10px; }
+.proto-cell { position: relative; border: 1px solid var(--edge); border-radius: 6px; background: #11151a; cursor: pointer; overflow: hidden; padding: 0; }
+.proto-cell.on { background: #3b2a12; border-color: #f2a33a; }
+.proto-cell-gate { position: absolute; left: 0; bottom: 0; height: 6px; background: #f2a33a; }
+.proto-cell-label { position: absolute; top: 5px; left: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.proto-cell.downbeat .proto-cell-label { color: var(--text); }
+.proto-pattern-tools { display: flex; align-items: center; gap: 6px; }
+.proto-pattern-tools button { border: 1px solid var(--edge); border-radius: 4px; padding: 2px 8px; background: transparent; color: var(--text-2); font-size: 11.5px; cursor: pointer; }
+.proto-pattern-tools .hint { margin-left: auto; }
+.proto-ring-row { display: flex; justify-content: center; padding: 2px 0 0; }
+.proto-ring-track { fill: none; stroke: #262c35; stroke-width: 1; }
+.proto-ring-dot { fill: #11151a; stroke: #3a4350; stroke-width: 1.2; cursor: pointer; }
+.proto-ring-dot.on { fill: #f2a33a; stroke: #f2a33a; }
+.proto-ring-count { fill: var(--text); font-family: var(--mono); font-size: 13px; text-anchor: middle; }
+.proto-ring-mode { fill: var(--muted); font-size: 9.5px; text-anchor: middle; }
+.proto-pattern { padding-top: 26px; }
+.proto-ring-dot.first { stroke: var(--text); stroke-width: 2; }

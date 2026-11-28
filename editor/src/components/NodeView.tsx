@@ -11,6 +11,7 @@ import { OutputMeter } from "./OutputMeter";
 import { FrequencyModeSelect, ParamControl, type FrequencyMode } from "./ParamControl";
 // PROTOTYPE #33/#41
 import { EnvelopeBody } from "../prototype/envelope.prototype";
+import { SequencerBody, useSequencerWide } from "../prototype/sequencer.prototype";
 import { PrototypeFrequency, PrototypeTitle, useDocNodes, useModulatedReadout, useNodeLabel, useVariant } from "../prototype/design-33-41.prototype";
 
 function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
@@ -20,6 +21,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const label = useNodeLabel();
   const modulatedReadout = useModulatedReadout();
   const nodes = useDocNodes();
+  const wide = useSequencerWide(node);
   const errors = issues.filter((issue) => issue.severity === "error");
   const warning = issues.find((issue) => issue.severity === "warning");
   const portIssue = (port: string) => errors.find((issue) => issue.port === port)?.message;
@@ -27,6 +29,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
   const audioIn = ports.find((port) => port.name === "in");
   const className = [
     "sf-node",
+    wide && "proto-wide",
     selected && "selected",
     errors.length > 0 && "has-error",
     warning && errors.length === 0 && "has-warning",
@@ -88,7 +91,19 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
     handles.push(...body.handles);
   }
 
-  if (node.kind !== "envelope") descriptor.params.forEach((param) => {
+  if (node.kind === "sequencer") {
+    const clock = ports.find((port) => port.name === "clock")!;
+    const body = SequencerBody({
+      node, descriptor, clockFrom: sources.clock, rowTop: rowPortTop,
+      clockHandle: (top) => inputHandle(clock, top),
+      setParam: (name, value, continuous) => actions.setParam(node.id, name, value, continuous),
+      beginContinuous: actions.beginContinuous,
+    });
+    rows.push(...body.rows);
+    handles.push(...body.handles);
+  }
+
+  if (node.kind !== "envelope" && node.kind !== "sequencer") descriptor.params.forEach((param) => {
     const index = rows.length;
     const control = ports.find((port) => port.signal === "control");
     const isCutoff = param.name === "cutoff_hz";

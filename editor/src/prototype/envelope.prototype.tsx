@@ -242,6 +242,13 @@ export function probeFrames(graph: GraphSpec, node: DocNode, rate: number, fallb
   // A sub-audio oscillator (an LFO or a gate clock) also needs a couple of its own cycles.
   const own = Number(node.params.frequency_hz ?? 0);
   if (own > 0 && own < 20) return Math.round(Math.min(4, Math.max(0.25, 2 / own)) * rate);
+  // PROTOTYPE sequencer: one bar, from the internal tempo or 16 clock periods.
+  if (node.kind === "sequencer") {
+    const clock = graph.wires.find((wire) => wire.to.node === node.id && wire.to.port === "clock")?.from;
+    const hz = Number(graph.nodes.find((candidate) => candidate.id === clock)?.params.frequency_hz ?? 0);
+    const seconds = hz > 0 ? 16 / hz : (4 * 60) / Number(node.params.tempo_bpm ?? 120);
+    return Math.round(Math.min(8, seconds) * rate);
+  }
   if (node.kind !== "envelope") return fallback;
   const gate = gateSource(graph, node.id);
   const hz = Number(gate?.params.frequency_hz ?? 0);

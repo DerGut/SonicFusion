@@ -160,6 +160,8 @@ function inputNames(node: NodeSpec): string[] {
       return ["in"];
     case "envelope":
       return ["in", "gate"];
+    case "sequencer":
+      return [];
     case "mix":
       return (node.params.weights as number[]).map((_, index) => `in.${index}`);
     default:
@@ -186,6 +188,8 @@ function missingUpstream(graph: GraphSpec, node: string): GraphIssue[] {
     }
     const cutoff = feeds.get(`${id}:cutoff`);
     if (cutoff) pending.push(cutoff);
+    const clock = feeds.get(`${id}:clock`);
+    if (clock) pending.push(clock);
   }
   return issues;
 }
@@ -213,6 +217,8 @@ function mockValidate(graph: GraphSpec): GraphIssue[] {
     }
     const cutoff = feeds.get(`${id}:cutoff`);
     if (cutoff) pending.push(cutoff);
+    const clock = feeds.get(`${id}:clock`);
+    if (clock) pending.push(clock);
   }
   for (const node of graph.nodes) {
     if (!reachable.has(node.id)) {
@@ -249,6 +255,10 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
     // PROTOTYPE #34: envelope state depends on the gate's history, so replay it from frame 0.
     const envelopeLevel = node?.kind === "envelope" && feeds.has(`${id}:gate`)
       ? adsr(render(graph, feeds.get(`${id}:gate`)!, 0, start + frames), node.params, start)
+      : () => 0;
+    // PROTOTYPE: the sequencer's step position also depends on the clock's history.
+    const sequencerGate = node?.kind === "sequencer"
+      ? sequence(feeds.has(`${id}:clock`) ? render(graph, feeds.get(`${id}:clock`)!, 0, start + frames) : null, node.params, start, start + frames)
       : () => 0;
     for (let n = 0; n < frames && node; n++) {
       const t = (start + n) / INFO.sample_rate_hz;
@@ -290,6 +300,9 @@ function render(graph: GraphSpec, root: string, start: number, frames: number): 
         case "envelope":
           out[n] = input("in")[n] * envelopeLevel(n);
           break;
+        case "sequencer":
+          out[n] = sequencerGate(n);
+          break;
       }
     }
     cache.set(id, out);
@@ -326,6 +339,41 @@ function adsr(gate: number[], params: Record<string, unknown>, start: number) {
       if (level <= 0) { level = 0; stage = "idle"; }
     }
     levels[n] = level;
+  }
+  return (n: number) => levels[start + n];
+}
+
+/**
+ * PROTOTYPE: a one-bar step sequencer. With a clock, each rising edge (≤ 0 → > 0)
+ * advances one step; without one, the internal tempo runs four steps per beat.
+ * The gate is 1 for `gate` of each active step, else 0.
+ */
+function sequence(clock: number[] | null, params: Record<string, unknown>, start: number, end: number) {
+  const rate = INFO.sample_rate_hz;
+  const steps = (params.steps as number[] | undefined) ?? [];
+  const length = Math.max(1, steps.length);
+  const gate = Number(params.gate ?? 0.5);
+  const levels = new Float32Array(end);
+  if (clock) {
+    // Gate length is a share of the last measured clock period.
+    let step = -1, high = false, lastEdge = -1, period = rate / 8;
+    for (let n = 0; n < end; n++) {
+      const nowHigh = clock[n] > 0;
+      if (nowHigh && !high) {
+        if (lastEdge >= 0) period = n - lastEdge;
+        lastEdge = n;
+        step = (step + 1) % length;
+      }
+      high = nowHigh;
+      levels[n] = step >= 0 && steps[step] && n - lastEdge < gate * period ? 1 : 0;
+    }
+  } else {
+    const stepFrames = (60 / Number(params.tempo_bpm ?? 120) / 4) * rate;
+    for (let n = 0; n < end; n++) {
+      const position = n / stepFrames;
+      const step = Math.floor(position) % length;
+      levels[n] = steps[step] && position % 1 < gate ? 1 : 0;
+    }
   }
   return (n: number) => levels[start + n];
 }
@@ -391,6 +439,18 @@ function prototypeCatalog(catalog: NodeDescriptor[]): NodeDescriptor[] {
       time("decay_s", "Decay", 0.2),
       { name: "sustain", label: "Sustain", unit: null, min: 0, max: 1, default: 0.7, scale: "linear" },
       time("release_s", "Release", 0.3),
+    ],
+  }, {
+    kind: "sequencer",
+    label: "Sequencer",
+    category: "source",
+    signature: "seq(steps, clock?)",
+    inputs: [{ name: "clock", label: "Clock", signal: "control", required: false }],
+    variadic_input: null,
+    has_output: true,
+    params: [
+      { name: "tempo_bpm", label: "Tempo", unit: "BPM", min: 20, max: 300, default: 120, scale: "linear" },
+      { name: "gate", label: "Gate length", unit: "%", min: 0.05, max: 1, default: 0.5, scale: "linear" },
     ],
   }, ...withWet.filter((node) => node.kind === "output")];
 }
