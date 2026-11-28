@@ -1,15 +1,17 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { DETUNE_STEP, detuneBounds, FREQUENCY_MODES, formatCents, hzToBpm, hzToMidi, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, type FrequencyMode, type Pitch } from "../model/pitch";
+import { bpmToHz, DETUNE_STEP, detuneBounds, FREQUENCY_MODES, formatCents, hzToBpm, hzToMidi, isTempoFrequency, noteName, parseFrequency, pitchToHz, PITCH_FLOOR_HZ, TEMPO_CEILING_BPM, type FrequencyMode, type Pitch } from "../model/pitch";
 import { ParameterRange } from "./ParameterRange";
 
 const WHITE_KEYS_PER_OCTAVE = 7;
 const BLACK_KEY_BOUNDARY: Record<number, number> = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 };
+const TEMPO_PRESETS = [60, 90, 100, 120, 128, 140, 174];
+const TAP_TIMEOUT_MS = 2500;
 const MODE_OPTIONS = [[undefined, "Auto"], ...FREQUENCY_MODES] as const;
 const octaveOf = (midi: number) => Math.floor(midi / 12) - 1;
 
-export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mode, preferredMode, onModeChange, onClose,
+export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mode, rhythmic, preferredMode, onModeChange, onClose,
   onBeginContinuous, onFrequency, onPitch }: {
   id: string;
   anchor: RefObject<HTMLButtonElement | null>;
@@ -19,6 +21,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
   min: number;
   max: number;
   mode: FrequencyMode;
+  rhythmic: boolean;
   preferredMode?: FrequencyMode;
   onModeChange?: (mode?: FrequencyMode) => void;
   onClose: () => void;
@@ -30,9 +33,14 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
   const exact = useRef<HTMLInputElement>(null);
   const [text, setText] = useState<string | null>(null);
   const pendingText = useRef<string | null>(null);
+  const taps = useRef<number[]>([]);
   const bpm = mode === "bpm";
-  const noteFallback = preferredMode === "note" && !pitch;
+  const allowBpm = onModeChange !== undefined;
+  const unitOptions = MODE_OPTIONS.filter(([unit]) => unit === undefined || unit === "hz" ||
+    (unit === "bpm" ? rhythmic : pitch !== null));
+  const dormantMode = preferredMode && !unitOptions.some(([unit]) => unit === preferredMode) ? preferredMode : undefined;
   const exactValue = String(bpm ? hzToBpm(value) : value);
+  const validTempo = (hz: number) => isTempoFrequency(hz) && hz <= max;
   const [browsedOctave, setBrowsedOctave] = useState<number | null>(null);
   const floorHz = Math.max(min, PITCH_FLOOR_HZ);
   const detune = pitch && detuneBounds(pitch.midi, floorHz, max);
@@ -47,19 +55,41 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
   const commit = (report: boolean) => {
     const draft = pendingText.current;
     if (draft === null) return;
-    const hz = draft === exactValue ? value : draft.trim() ? parseFrequency(draft, mode) : NaN;
-    if (!Number.isFinite(hz) && report) {
-      exact.current?.setCustomValidity(bpm ? "Enter a number in BPM." : "Enter a frequency in Hz or a note such as C#4.");
+    const hz = draft === exactValue ? value : draft.trim() ? parseFrequency(draft, mode, allowBpm) : NaN;
+    const valid = Number.isFinite(hz) && (!bpm || validTempo(hz));
+    if (!valid && report) {
+      const message = Number.isFinite(hz)
+        ? "Enter a nonnegative tempo below " + TEMPO_CEILING_BPM + " BPM and within the device's frequency range."
+        : allowBpm ? "Enter a frequency in Hz, as a note such as C#4, or in BPM."
+        : "Enter a frequency in Hz or a note such as C#4.";
+      exact.current?.setCustomValidity(message);
       exact.current?.reportValidity();
       return;
     }
     // Consume the draft before updating the graph. A click can trigger both blur and submit.
     updateText(null);
     exact.current?.setCustomValidity("");
-    if (Number.isFinite(hz) && hz !== value) {
+    if (valid && hz !== value) {
       onFrequency(hz);
       setBrowsedOctave(null);
     }
+  };
+
+  const setTempo = (hz: number) => {
+    if (!validTempo(hz)) return;
+    updateText(null);
+    onFrequency(hz);
+  };
+
+  const tapTempo = () => {
+    const now = performance.now();
+    const recent = taps.current;
+    if (recent.length > 0 && now - recent[recent.length - 1] >= TAP_TIMEOUT_MS) recent.length = 0;
+    recent.push(now);
+    if (recent.length > 5) recent.shift();
+    if (recent.length < 2) return;
+    const elapsed = now - recent[0];
+    if (elapsed > 0) setTempo(bpmToHz(Math.round(hzToBpm(1000 * (recent.length - 1) / elapsed))));
   };
 
   useLayoutEffect(() => {
@@ -127,7 +157,7 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
             <button type="button" aria-label="Octave up" disabled={octave >= highestOctave}
               onClick={() => setBrowsedOctave(octave + 1)}>›</button>
           </>
-        ) : <span>{label}</span>}
+        ) : <span>{bpm ? "One cycle per beat" : label}</span>}
         <button type="button" className="frequency-popover-close" aria-label="Close frequency editor"
           onClick={closeAndFocus}>×</button>
       </div>
@@ -168,21 +198,37 @@ export function FrequencyPopover({ id, anchor, label, value, pitch, min, max, mo
           )}
         </>
       )}
+      {bpm && (
+        <>
+          <div className="tempo-controls" role="group" aria-label="Tempo presets">
+            {TEMPO_PRESETS.map((preset) => (
+              <button key={preset} type="button" aria-label={preset + " BPM"} disabled={!validTempo(bpmToHz(preset))}
+                aria-pressed={value === bpmToHz(preset)} onClick={() => setTempo(bpmToHz(preset))}>{preset}</button>
+            ))}
+          </div>
+          <div className="tempo-controls">
+            <button type="button" aria-label="Halve tempo" onClick={() => setTempo(value / 2)}>÷2</button>
+            <button type="button" aria-label="Double tempo" disabled={!validTempo(value * 2)}
+              onClick={() => setTempo(value * 2)}>×2</button>
+            <button type="button" aria-label="Tap tempo" title="Tap at least twice" onClick={tapTempo}>Tap</button>
+          </div>
+        </>
+      )}
       {onModeChange && (
         <>
           <div className="frequency-unit" role="radiogroup" aria-label="Frequency unit"
-            aria-describedby={noteFallback ? id + "-note-fallback" : undefined}>
+            aria-describedby={dormantMode ? id + "-mode-fallback" : undefined}>
             <span aria-hidden="true">Frequency unit</span>
-            {MODE_OPTIONS.map(([unit, name]) => (
+            {unitOptions.map(([unit, name]) => (
               <label key={name}>
-                <input type="radio" name={id + "-unit"} checked={preferredMode === unit}
-                  disabled={unit === "note" && !pitch && !noteFallback} onChange={() => onModeChange(unit)} />
+                <input type="radio" name={id + "-unit"} checked={preferredMode === unit} onChange={() => onModeChange(unit)} />
                 {name}
               </label>
             ))}
           </div>
-          {noteFallback && <p className="param-note" id={id + "-note-fallback"}>
-            Note mode shows Hz below {PITCH_FLOOR_HZ} Hz.
+          {dormantMode && <p className="param-note" id={id + "-mode-fallback"}>
+            {dormantMode === "note" ? "Note display returns at " + PITCH_FLOOR_HZ + " Hz."
+              : "BPM display returns below " + PITCH_FLOOR_HZ + " Hz."}
           </p>}
         </>
       )}

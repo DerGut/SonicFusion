@@ -4,6 +4,8 @@ export const FREQUENCY_MODES = [["hz", "Hz"], ["note", "Note"], ["bpm", "BPM"]] 
 export type FrequencyMode = typeof FREQUENCY_MODES[number][0];
 
 const SECONDS_PER_MINUTE = 60;
+export const TEMPO_CEILING_BPM = PITCH_FLOOR_HZ * SECONDS_PER_MINUTE;
+export type FrequencyRole = "audio" | "control" | "gate";
 
 const A4_HZ = 440;
 const A4_MIDI = 69;
@@ -34,8 +36,13 @@ export function pitchFromHz(hz: number, reference?: number): Pitch | null {
   return { midi, cents: (semitone - midi) * 100 };
 }
 
-export function defaultFrequencyMode(hz: number, feedsControl: boolean): FrequencyMode {
-  return feedsControl || !(hz >= PITCH_FLOOR_HZ) ? "hz" : "note";
+export function isTempoFrequency(hz: number): boolean {
+  return hz >= 0 && hz < PITCH_FLOOR_HZ;
+}
+
+export function defaultFrequencyMode(hz: number, role: FrequencyRole, oscillator: boolean): FrequencyMode {
+  if (oscillator && role === "gate" && isTempoFrequency(hz)) return "bpm";
+  return role === "audio" && hz >= PITCH_FLOOR_HZ ? "note" : "hz";
 }
 
 /** A semitone within the slider range, or free Hz for subaudio rates. */
@@ -76,14 +83,36 @@ export function hzToBpm(hz: number): number {
   return hz * SECONDS_PER_MINUTE;
 }
 
-/** Bare numbers are Hz except in BPM mode. Note names can include a cents offset. */
-export function parseFrequency(text: string, mode: FrequencyMode = "hz"): number {
-  if (mode === "bpm") {
-    const bpm = text.trim().replace(/\s*bpm$/i, "");
-    return bpm ? Number(bpm) / SECONDS_PER_MINUTE : NaN;
+export function bpmToHz(bpm: number): number {
+  return bpm / SECONDS_PER_MINUTE;
+}
+
+export function snapTempoHz(hz: number, min: number, max: number, direction = 0): number {
+  let first = Math.ceil(hzToBpm(min));
+  let last = Math.min(TEMPO_CEILING_BPM - 1, Math.floor(hzToBpm(max)));
+  if (bpmToHz(first) < min) first++;
+  if (bpmToHz(last) > max) last--;
+  if (first > last) return hz;
+  const bpm = hzToBpm(hz);
+  const nearest = Math.round(bpm);
+  const basis = bpmToHz(nearest) === hz ? nearest : bpm;
+  const next = direction > 0 ? Math.floor(basis) + 1 : direction < 0 ? Math.ceil(basis) - 1 : nearest;
+  if ((direction > 0 && next > last) || (direction < 0 && next < first)) return hz;
+  return bpmToHz(Math.min(last, Math.max(first, next)));
+}
+
+/** Bare numbers follow the displayed unit. Explicit units and notes override it. */
+export function parseFrequency(text: string, mode: FrequencyMode = "hz", allowBpm = mode === "bpm"): number {
+  const value = text.trim();
+  const suffix = /(?:bpm|hz)$/i.exec(value);
+  if (suffix) {
+    const number = value.slice(0, suffix.index).trim();
+    const bpm = suffix[0].toLowerCase() === "bpm";
+    if (!number || (bpm && !allowBpm)) return NaN;
+    return bpm ? bpmToHz(Number(number)) : Number(number);
   }
-  const match = /^([A-G])([#b♯♭]?)(-?\d+)(?:\s*([+-]\d+(?:\.\d+)?)\s*[c¢])?$/i.exec(text.trim());
-  if (!match) return Number(text);
+  const match = /^([A-G])([#b♯♭]?)(-?\d+)(?:\s*([+-]\d+(?:\.\d+)?)\s*[c¢])?$/i.exec(value);
+  if (!match) return mode === "bpm" ? bpmToHz(Number(value)) : Number(value);
   const [, letter, accidental, octave, detune] = match;
   const natural = NATURAL_STEPS[NATURALS.indexOf(letter.toUpperCase())];
   const adjustment = accidental === "#" || accidental === "♯" ? 1 : accidental ? -1 : 0;

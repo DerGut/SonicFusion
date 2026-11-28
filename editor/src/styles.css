@@ -232,7 +232,11 @@ code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .frequency-unit > span { width: 100%; }
 .frequency-unit label { display: flex; align-items: center; gap: 3px; }
 .frequency-unit input { margin: 0; accent-color: var(--control); }
-.frequency-unit label:has(input:disabled) { color: var(--muted); }
+.tempo-controls { display: flex; flex-wrap: wrap; gap: 5px; }
+.tempo-controls button {
+  border: 1px solid var(--edge); border-radius: 4px; background: var(--panel); padding: 2px 6px;
+}
+.tempo-controls button[aria-pressed="true"] { border-color: var(--audio); color: var(--audio); }
 .frequency-exact { margin-top: 4px; }
 .frequency-exact label { white-space: nowrap; color: var(--text-2); }
 .frequency-exact .value-input { flex: 1; min-width: 0; }

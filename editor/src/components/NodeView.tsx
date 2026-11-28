@@ -98,7 +98,7 @@ function NodeViewImpl({ data, selected }: NodeProps<SfNode>) {
       };
       rows.push(param.frequency ? (
         <FrequencyControl key={param.name} {...props} sampleRate={session.sample_rate_hz}
-          feedsControl={data.feedsControl} override={node.frequencyMode}
+          role={data.frequencyRole} override={node.frequencyMode}
           onOverride={(mode) => actions.setFrequencyMode(node.id, mode)} />
       ) : <ParamControl key={param.name} {...props} />);
     }
