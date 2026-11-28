@@ -122,6 +122,22 @@ pub fn lower(graph: &GraphSpec, root: &NodeId) -> Result<Lowered, Vec<GraphIssue
                 num(*sustain_level),
                 num(*release_seconds),
             ),
+            NodeKind::Sequencer {
+                steps,
+                tempo_bpm,
+                gate_length,
+            } => {
+                let steps: Vec<_> = steps.iter().map(|step| num(*step)).collect();
+                let clock = wired(id, "clock")
+                    .map(|clock| format!(", {}", var(clock)))
+                    .unwrap_or_default();
+                format!(
+                    "sequencer([{}], {}, {}{clock})",
+                    steps.join(", "),
+                    num(*tempo_bpm),
+                    num(*gate_length),
+                )
+            }
             NodeKind::Output {} => {
                 let from = input(id, "in").map_err(one)?;
                 writeln!(lowered.source, "{} -> out", var(&from)).unwrap();
@@ -301,6 +317,51 @@ mod tests {
             "{}",
             lowered.source
         );
+    }
+
+    #[test]
+    fn sequencer_lowers_with_and_without_a_clock() {
+        let mut graph: GraphSpec = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {"id": "clock", "kind": "square", "params": {"frequency_hz": 8.0, "pulse_width": 0.5}},
+                {"id": "seq", "kind": "sequencer", "params": {
+                    "steps": [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0],
+                    "tempo_bpm": 96.5, "gate_length": 0.25
+                }},
+                {"id": "out", "kind": "output", "params": {}}
+            ],
+            "wires": [{"from": "seq", "to": {"node": "out", "port": "in"}}]
+        }))
+        .unwrap();
+        let lowered = lower(&graph, &NodeId::new("out")).unwrap();
+        assert_eq!(
+            lowered.source,
+            "sequencer([1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], 96.5, 0.25) -> $n0;\n$n0 -> out\n"
+        );
+        build_live_plan(&lowered.source, &ExecutionConfig::default()).unwrap();
+
+        graph.wires.push(sonicfusion_graph_api::Wire {
+            from: NodeId::new("clock"),
+            to: PortRef {
+                node: NodeId::new("seq"),
+                port: "clock".into(),
+            },
+        });
+        let lowered = lower(&graph, &NodeId::new("out")).unwrap();
+        assert!(
+            lowered
+                .source
+                .starts_with("square(8, 0.5) -> $n0;\nsequencer(["),
+            "{}",
+            lowered.source
+        );
+        assert!(
+            lowered.source.contains("], 96.5, 0.25, $n0) -> $n1;"),
+            "{}",
+            lowered.source
+        );
+        build_live_plan(&lowered.source, &ExecutionConfig::default()).unwrap();
     }
 
     #[test]

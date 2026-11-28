@@ -44,6 +44,9 @@ pub struct NodeSpec {
     pub kind: NodeKind,
 }
 
+/// Steps in a sequencer's one-bar pattern.
+pub const SEQUENCER_STEPS: usize = 16;
+
 /// Node kinds and their configured parameters. Serialized as
 /// `{"kind": "low_pass", "params": {"cutoff_hz": 1200.0}}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -88,6 +91,14 @@ pub enum NodeKind {
         sustain_level: f64,
         release_seconds: f64,
     },
+    /// A one-bar, 16-step gate pattern. Each step is 0 or 1. `tempo_bpm`
+    /// applies while the optional `clock` port is unconnected; a connected
+    /// clock advances one step per rising edge instead.
+    Sequencer {
+        steps: Vec<f64>,
+        tempo_bpm: f64,
+        gate_length: f64,
+    },
     Output {},
 }
 
@@ -112,6 +123,7 @@ impl NodeKind {
             Self::LowPass { .. } => "low_pass",
             Self::Mix { .. } => "mix",
             Self::Envelope { .. } => "envelope",
+            Self::Sequencer { .. } => "sequencer",
             Self::Output {} => "output",
         }
     }
@@ -151,6 +163,11 @@ impl NodeKind {
                     required: true,
                 },
             ],
+            Self::Sequencer { .. } => vec![InputPort {
+                name: "clock".into(),
+                signal: Signal::Control,
+                required: false,
+            }],
             Self::Mix { weights } => (0..weights.len())
                 .map(|index| audio(&format!("in.{index}")))
                 .collect(),

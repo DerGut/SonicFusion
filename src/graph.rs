@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use crate::physical::frame::{Adsr, FrameEnvelopeExec};
+use crate::physical::frame::{Adsr, FrameEnvelopeExec, FrameSequencerExec, StepPattern};
 
 pub(crate) type Plan = Arc<dyn ExecutionPlan>;
 
@@ -45,6 +45,7 @@ pub(crate) enum Node {
         gate: NodeId,
         adsr: Adsr,
     },
+    Sequencer(StepPattern, Option<NodeId>),
 }
 
 pub(crate) struct GraphBuilder {
@@ -81,6 +82,7 @@ impl GraphBuilder {
                 validate_low_pass_mix(*mix)?;
             }
             Node::Envelope { adsr, .. } => adsr.validate()?,
+            Node::Sequencer(pattern, _) => pattern.validate(self.sample_rate_hz)?,
             Node::Mix(inputs, gains)
                 if inputs.is_empty()
                     || inputs.len() != gains.len()
@@ -168,6 +170,14 @@ impl PreparedGraph {
                     input(gate),
                     adsr,
                 )?),
+                Node::Sequencer(pattern, clock) => Arc::new(match clock {
+                    None => FrameSequencerExec::try_new(config, pattern)?,
+                    Some(id) => FrameSequencerExec::try_new_clocked(
+                        config,
+                        pattern,
+                        FramePlan::try_from_plan(config, input(id))?,
+                    )?,
+                }),
                 Node::Mix(ids, gains) => Arc::new(FrameMixExec::try_new(
                     config,
                     ids.into_iter().map(input).collect(),

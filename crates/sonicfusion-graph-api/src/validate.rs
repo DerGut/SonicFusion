@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GRAPH_VERSION, GraphSpec, NodeId, NodeKind, PortRef, SessionInfo};
+use crate::{GRAPH_VERSION, GraphSpec, NodeId, NodeKind, PortRef, SEQUENCER_STEPS, SessionInfo};
 
 /// Longest supported chain from a source to the root. Deeper plans overflow
 /// the stack when the engine polls its nested streams.
@@ -608,6 +608,34 @@ fn param_problems(
             }
             if !(0.0..=1.0).contains(sustain_level) {
                 problems.push(("sustain_level", "sustain must be between 0 and 1".into()));
+            }
+        }
+        NodeKind::Sequencer {
+            steps,
+            tempo_bpm,
+            gate_length,
+        } => {
+            if steps.len() != SEQUENCER_STEPS
+                || steps.iter().any(|step| *step != 0.0 && *step != 1.0)
+            {
+                problems.push((
+                    "steps",
+                    format!("the pattern needs {SEQUENCER_STEPS} steps, each on or off"),
+                ));
+            }
+            // A step must last at least one frame at the internal tempo.
+            let ceiling = f64::from(session.sample_rate_hz) * 15.0;
+            if !tempo_bpm.is_finite() || *tempo_bpm <= 0.0 || *tempo_bpm > ceiling {
+                problems.push((
+                    "tempo_bpm",
+                    format!("tempo must be greater than 0 and at most {ceiling} BPM"),
+                ));
+            }
+            if !(0.0..=1.0).contains(gate_length) {
+                problems.push((
+                    "gate_length",
+                    "gate length must be between 0% and 100%".into(),
+                ));
             }
         }
         NodeKind::Noise {} | NodeKind::Output {} => {}

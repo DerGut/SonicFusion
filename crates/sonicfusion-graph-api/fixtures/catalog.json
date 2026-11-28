@@ -269,6 +269,65 @@
     ]
   },
   {
+    "kind": "sequencer",
+    "label": "Sequencer",
+    "category": "source",
+    "signature": "sequencer(steps, bpm, gate)",
+    "inputs": [
+      {
+        "name": "clock",
+        "label": "Clock",
+        "signal": "control",
+        "required": false
+      }
+    ],
+    "variadic_input": null,
+    "pattern": {
+      "name": "steps",
+      "label": "Pattern",
+      "length": 16,
+      "default": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "has_output": true,
+    "params": [
+      {
+        "name": "tempo_bpm",
+        "label": "Tempo",
+        "unit": "BPM",
+        "min": 20.0,
+        "max": 300.0,
+        "default": 120.0,
+        "scale": "linear"
+      },
+      {
+        "name": "gate_length",
+        "label": "Gate length",
+        "unit": "%",
+        "min": 0.05,
+        "max": 1.0,
+        "default": 0.5,
+        "scale": "linear"
+      }
+    ]
+  },
+  {
     "kind": "output",
     "label": "Output",
     "category": "output",

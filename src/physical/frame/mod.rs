@@ -6,6 +6,7 @@ mod low_pass_filter;
 mod mix;
 mod plan;
 mod sawtooth;
+mod sequencer;
 mod sine;
 mod square;
 mod white_noise;
@@ -19,6 +20,7 @@ pub(crate) use low_pass_filter::{validate_constant_cutoff, validate_mix as valid
 pub use mix::FrameMixExec;
 pub use plan::FramePlan;
 pub use sawtooth::FrameSawToothOscExec;
+pub use sequencer::{FrameSequencerExec, SEQUENCER_STEPS, StepPattern};
 pub use sine::FrameSineOscExec;
 pub use square::FrameSquareOscExec;
 pub(crate) use square::validate_pulse_width;
